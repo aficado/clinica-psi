@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="Ilustración de yoga">
+  <rect width="640" height="360" fill="#dce7e0"/>
+  <circle cx="500" cy="90" r="56" fill="#c97b5a"/>
+  <path d="M0 290 C 160 240, 320 260, 480 300 C 560 320, 610 310, 640 300 L 640 360 L 0 360 Z" fill="#3f5e52"/>
+  <g fill="none" stroke="#5b7a6b" stroke-width="14" stroke-linecap="round">
+    <path d="M320 210 C 320 160, 280 140, 240 150"/>
+    <path d="M320 210 C 320 160, 360 140, 400 150"/>
+    <path d="M320 210 L 320 260"/>
+  </g>
+  <circle cx="320" cy="128" r="22" fill="#5b7a6b"/>
+</svg>

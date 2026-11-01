@@ -1,0 +1,139 @@
+@import "tailwindcss";
+
+/* ============================================================
+   Design tokens (PROMPT.md §6.4)
+   Editables desde el panel admin (Fase 3) sin tocar código:
+   en producción estos tokens se inyectan desde `theme_tokens`
+   en la base de datos local.
+   ============================================================ */
+@theme {
+  /* Paleta: "Calma cálida y profesional" (verificada contraste WCAG AA) */
+  --color-sage: #3f5e52; /* primario */
+  --color-sage-dark: #2f4a40;
+  --color-sage-light: #5b7a6b;
+  --color-mist: #dce7e0; /* superficies */
+  --color-mist-deep: #cfe0d7;
+  --color-sand: #f5efe6; /* fondo */
+  --color-terracotta: #c97b5a; /* acento y CTA */
+  --color-terracotta-dark: #b56543;
+  --color-ink: #1f2a27; /* texto */
+  --color-ink-soft: #4c5b55; /* texto secundario */
+
+  /* next/font inyecta --font-fraunces / --font-inter (ver layout.tsx) */
+  --font-display: var(--font-fraunces);
+  --font-sans: var(--font-inter);
+
+  --radius-card: 1.25rem;
+  --radius-btn: 0.75rem;
+  --radius-input: 0.6rem;
+}
+
+/* ---------- Base ---------- */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-sand text-ink font-sans;
+  font-size: 1rem; /* cuerpo ≥ 16 px */
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 {
+  @apply font-display;
+  letter-spacing: -0.01em;
+}
+
+/* Foco visible y consistente (WCAG 2.2) */
+:focus-visible {
+  outline: 3px solid var(--color-sage);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Subrayado de enlaces sin romper la estética */
+a {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--color-terracotta) 60%, transparent);
+  text-underline-offset: 3px;
+  transition: text-decoration-color 200ms ease;
+}
+a:hover {
+  text-decoration-color: var(--color-terracotta);
+}
+
+/* Botones sin subrayado */
+a[class*="btn"] {
+  text-decoration: none;
+}
+
+/* ---------- Formas orgánicas (fondos sutiles) ---------- */
+.blob {
+  position: absolute;
+  border-radius: 45% 55% 48% 52% / 52% 46% 54% 48%;
+  pointer-events: none;
+}
+
+
+/* Acordeones (FAQ) */
+details.faq > summary {
+  cursor: pointer;
+  list-style: none;
+}
+details.faq > summary::-webkit-details-marker {
+  display: none;
+}
+
+
+
+/* ============================================================
+   Modo oscuro (R3-E, 8.14)
+   La clase `dark` la aplica el script inline del layout sobre <html>
+   (antes del paint, sin flash): elección del usuario
+   (localStorage.rv_theme) o el ajuste del sistema.
+
+   Las variables se sobreescriben con `!important` porque los tokens
+   del admin (`theme_tokens`) viajan como estilo inline en <html>: en
+   modo oscuro se ignora deliberadamente la paleta clara del panel.
+   Contrastes AA verificados (2026-10-22): ink/sand 15.2 ·
+   ink-soft/mist 7.4 · white/bg-sage 9.7 · ink/bg-terracotta 5.8 ·
+   text-sage/mist 6.4 · text-terracotta/sand 7.3 · mist-text/bg-sage 7.6.
+   ============================================================ */
+html.dark {
+  color-scheme: dark;
+  --color-sand: #131a17 !important;
+  --color-mist: #1e2823 !important;
+  --color-mist-deep: #28352e !important;
+  --color-ink: #e9efea !important;
+  --color-ink-soft: #aab9b1 !important;
+  --color-sage: #84b39c !important;
+  --color-sage-dark: #a3cbb6 !important;
+  --color-sage-light: #6f9f89 !important;
+  --color-terracotta: #dd9576 !important;
+  --color-terracotta-dark: #e8ab8e !important;
+}
+
+/* Utilidades cuyo ROL (superficie o texto) difiere del rol del token:
+   las superficies de marca se mantienen profundas y el texto de marca,
+   claro. Sin estas reglas, p. ej. el footer (bg-sage + text-white) o
+   los CTAs (bg-terracotta + text-ink) perderían el contraste. */
+html.dark .bg-white { background-color: #1e2823 !important; }
+html.dark .bg-white\/90 { background-color: rgba(30, 40, 35, 0.9) !important; }
+html.dark .bg-sage { background-color: #2f4a40 !important; }
+html.dark .bg-sage-dark { background-color: #3c5a4d !important; }
+html.dark .hover\:bg-sage-dark:hover { background-color: #3c5a4d !important; }
+html.dark .bg-terracotta { background-color: #8a4a2f !important; }
+html.dark .bg-terracotta-dark { background-color: #9b5537 !important; }
+html.dark .hover\:bg-terracotta-dark:hover { background-color: #9b5537 !important; }
+html.dark .bg-ink { background-color: #0b0f0d !important; }
+html.dark .bg-ink\/40 { background-color: rgba(5, 8, 7, 0.6) !important; }
+html.dark .bg-ink\/55 { background-color: rgba(5, 8, 7, 0.7) !important; }
+html.dark .bg-ink\/95 { background-color: rgba(5, 8, 7, 0.95) !important; }
+/* Texto claro sobre superficies de marca profundas (footer, hero):
+   "mist" como texto conserva su luminosidad aunque el token pase a
+   superficie oscura. */
+html.dark .text-mist { color: #e6efe9 !important; }
+html.dark .text-mist\/70 { color: rgba(230, 239, 233, 0.7) !important; }
+html.dark .text-mist\/80 { color: rgba(230, 239, 233, 0.8) !important; }
+html.dark .text-mist\/90 { color: rgba(230, 239, 233, 0.9) !important; }

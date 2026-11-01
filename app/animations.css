@@ -1,0 +1,108 @@
+/* ============================================================
+   Sistema de animaciones — revelado al hacer scroll
+   Generado de cero (2026-10-16). Reemplaza a la sección de
+   animaciones que estaba en globals.css.
+   
+   - FUERZA: SIEMPRE activas. Se ignora `prefers-reduced-motion`
+     (decisión del dueño: que las animaciones se vean siempre).
+   - Entrada: fade + traslación vertical (animación CSS, no
+     transición): si el IntersectionObserver añade la clase antes
+     del primer paint, la animación se ejecuta desde su inicio.
+   - Stagger: se logra con `animation-delay` (prop `delay` en
+     <Reveal>), no con una nueva mecánica.
+   - Fallback sin JS: el contenido se ve sin animar (`.has-js`
+     controla el override en el layout).
+   ============================================================ */
+
+/* ---------- Estado oculto base (antes de revelar) ---------- */
+.reveal {
+  opacity: 0;
+  transform: translateY(40px);
+}
+
+.reveal-card {
+  transform: translateY(40px) scale(0.97);
+}
+
+/* ---------- Animación de entrada (siempre activa) ---------- */
+@keyframes reveal-in {
+  from {
+    opacity: 0;
+    transform: translateY(40px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes reveal-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(40px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.reveal.reveal-in {
+  animation: reveal-in 650ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.reveal-card.reveal-in {
+  animation: reveal-card-in 650ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ---------- Sin JavaScript: nada se queda ocuto ---------- */
+html:not(.has-js) .reveal,
+html:not(.has-js) .reveal-card {
+  opacity: 1;
+  transform: none;
+}
+
+/* ---------- Movimiento ambiental (decorativo) ---------- */
+@keyframes float-soft {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+@keyframes float-slow {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  50% {
+    transform: translate3d(16px, -20px, 0) rotate(2deg);
+  }
+}
+.float-soft {
+  animation: float-soft 5s ease-in-out infinite;
+}
+.float-slow {
+  animation: float-slow 9s ease-in-out infinite;
+}
+
+/* ---------- Menú móvil: entrada al abrir (se repite en cada apertura) ---------- */
+@keyframes menu-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes menu-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+.menu-fade-in {
+  animation: menu-fade-in 200ms ease both;
+}
+.menu-rise-in {
+  animation: menu-rise-in 450ms ease both;
+}

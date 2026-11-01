@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" role="img" aria-label="Fotografía de la psicóloga (pendiente)">
+  <rect width="400" height="400" rx="48" fill="#dce7e0"/>
+  <circle cx="200" cy="150" r="72" fill="#3f5e52"/>
+  <path d="M96 344 C 96 258, 150 226, 200 226 C 250 226, 304 258, 304 344 Z" fill="#3f5e52"/>
+  <path d="M288 118c-22 0-34 11-34 24 0 15 11 22 26 22 13 0 22-9 22-17 0-7-5-9-14-9z" fill="#f5efe6"/>
+  <circle cx="120" cy="120" r="8" fill="#c97b5a" opacity="0.6"/>
+  <circle cx="340" cy="220" r="6" fill="#c97b5a" opacity="0.5"/>
+</svg>

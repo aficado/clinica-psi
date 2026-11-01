@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="Ilustración de respiración">
+  <rect width="640" height="360" fill="#dce7e0"/>
+  <g fill="none" stroke="#3f5e52" stroke-width="8" stroke-linecap="round" opacity="0.75">
+    <path d="M120 180 C 180 130, 240 230, 300 180 C 360 130, 420 230, 480 180 C 520 148, 540 160, 560 180"/>
+  </g>
+  <g fill="none" stroke="#c97b5a" stroke-width="6" stroke-linecap="round" opacity="0.8">
+    <path d="M140 240 C 200 200, 260 280, 320 240 C 380 200, 440 280, 500 240"/>
+  </g>
+  <circle cx="90" cy="120" r="10" fill="#c97b5a" opacity="0.6"/>
+  <circle cx="560" cy="90" r="8" fill="#3f5e52" opacity="0.5"/>
+</svg>

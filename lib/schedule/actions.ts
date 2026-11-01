@@ -1,0 +1,156 @@
+"use server";
+
+// ============================================================
+// SERVER ACTIONS DE AGENDA — R4-A (5.05–5.07, 5.10)
+//
+// Dos superficies:
+//  1) PÚBLICAS (el paciente no tiene cuenta): `bookAppointment`,
+//     `cancelMyAppointment`, `reprogramar` — su credencial es el
+//     enlace único con token (5.07). Rate limiting: TODO (9.06).
+//  2) DE PANEL: horarios y cancelación administrativa — validan la
+//     sesión (`rv_admin_session`) y el RBAC (`canManageSchedule`)
+//     antes de escribir, y registran en auditoría (8.12).
+//
+// Toda la lógica y las validaciones duras viven en `lib/schedule.ts`;
+// aquí solo sesión, permisos, auditoría y revalidación.
+// ============================================================
+
+import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
+import { getSessionProfile } from "@/lib/admin/session";
+import { logAudit } from "@/lib/audit";
+import { canManageSchedule } from "@/lib/rbac";
+import {
+  cancelAppointment,
+  createAppointment,
+  deleteRule,
+  openSlotsFor,
+  rescheduleAppointment,
+  saveRule,
+  type BookingInput,
+  type DaySlots,
+} from "@/lib/schedule";
+
+const SESSION_COOKIE = "rv_admin_session";
+
+async function currentProfile() {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value ?? null;
+  return getSessionProfile(token);
+}
+
+type AvailabilityResult = { ok: true; days: DaySlots[] } | { ok: false; error: string };
+type Result = { ok: true; token?: string } | { ok: false; error: string };
+
+// ------------------------------------------------------------
+// Público (sin sesión): el token de `/mi-cita/<token>` es la llave
+
+/** Consulta de disponibilidad real (ocupación desde `appointments`). */
+export async function fetchAvailability(serviceSlug: string, proId: string): Promise<AvailabilityResult> {
+  return openSlotsFor(serviceSlug, proId);
+}
+
+/** Alta de cita con anti-doble-reserva (5.04/5.05). */
+export async function bookAppointment(input: BookingInput): Promise<Result> {
+  const res = createAppointment(input);
+  if (res.ok) {
+    logAudit(
+      { email: "anonimo (publico)", role: "paciente" },
+      "cita.crear",
+      "appointment",
+      res.token ?? null,
+      `${input.proId} ${input.dateIso} ${input.hour}:00 · ${input.serviceSlug}`,
+    );
+    revalidatePath("/admin/horarios");
+  }
+  return res;
+}
+
+/** Cancelación del paciente (5.07): sujeta a la anticipación mínima (D4). */
+export async function cancelMyAppointment(token: string): Promise<Result> {
+  const res = cancelAppointment(token, { enforceCutoff: true });
+  if (res.ok) {
+    logAudit({ email: "anonimo (publico)", role: "paciente" }, "cita.cancelar", "appointment", token);
+    revalidatePath("/admin/horarios");
+  }
+  return res;
+}
+
+/** Reprogramación del paciente desde el enlace único (5.07). */
+export async function rescheduleMyAppointment(token: string, dateIso: string, hour: number): Promise<Result> {
+  const res = rescheduleAppointment(token, dateIso, hour);
+  if (res.ok) {
+    logAudit(
+      { email: "anonimo (publico)", role: "paciente" },
+      "cita.reprogramar",
+      "appointment",
+      token,
+      `${dateIso} ${hour}:00`,
+    );
+    revalidatePath("/admin/horarios");
+  }
+  return res;
+}
+
+// ------------------------------------------------------------
+// Panel (admin + terapeuta)
+
+async function guardSchedule(): Promise<
+  { ok: false; error: string } | { ok: true; actor: { email: string; role: string } }
+> {
+  const profile = await currentProfile();
+  if (!profile) return { ok: false, error: "Inicia sesión para gestionar la agenda." };
+  if (!canManageSchedule(profile.role))
+    return { ok: false, error: "Solo el administrador y la terapeuta gestionan la agenda." };
+  return { ok: true, actor: { email: profile.email, role: profile.role } };
+}
+
+export interface RuleInput {
+  id?: number;
+  proId: string;
+  dow: number;
+  open: number;
+  close: number;
+  active: boolean;
+}
+
+/** Alta/edición de horarios por día (5.02). */
+export async function saveAvailabilityRule(input: RuleInput): Promise<{ ok: true } | { ok: false; error: string }> {
+  const guard = await guardSchedule();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  const res = saveRule(input);
+  if (res.ok) {
+    logAudit(
+      guard.actor,
+      "disponibilidad.guardar",
+      "availability_rule",
+      String(input.id ?? `${input.proId}:${input.dow}`),
+      `${input.proId} dia ${input.dow} ${input.open}-${input.close} ${input.active ? "activo" : "inactivo"}`,
+    );
+    revalidatePath("/admin/horarios");
+  }
+  return res;
+}
+
+/** Quita un día de atención del profesional. */
+export async function deleteAvailabilityRule(id: number): Promise<{ ok: true } | { ok: false; error: string }> {
+  const guard = await guardSchedule();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  const res = deleteRule(id);
+  if (res.ok) {
+    logAudit(guard.actor, "disponibilidad.borrar", "availability_rule", String(id));
+    revalidatePath("/admin/horarios");
+  }
+  return res;
+}
+
+/** Cancelación administrativa, sin anticipación mínima (5.10). */
+export async function adminCancelAppointment(token: string): Promise<Result> {
+  const guard = await guardSchedule();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  const res = cancelAppointment(token, { enforceCutoff: false, reason: "cancelada desde el panel" });
+  if (res.ok) {
+    logAudit(guard.actor, "cita.cancelar-admin", "appointment", token);
+    revalidatePath("/admin/horarios");
+  }
+  return res;
+}

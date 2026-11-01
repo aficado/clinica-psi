@@ -1,0 +1,26 @@
+# Dependencias instaladas y builds (no se versionan)
+node_modules/
+.next/
+out/
+build/
+*.tsbuildinfo
+
+# Entorno local (nunca al repo)
+.env
+.env.local
+.env.*.local
+
+# Base de datos SQLite local (runtime, no fuente)
+data/*.db*
+*.db
+*.db-wal
+*.db-shm
+
+# Logs del servidor y pruebas
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

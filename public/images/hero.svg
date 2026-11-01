@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 620" role="img" aria-label="Ilustración de un paisaje sereno con sol y colinas">
+  <rect width="800" height="620" fill="#dce7e0"/>
+  <circle cx="620" cy="170" r="86" fill="#c97b5a"/>
+  <path d="M0 430 C 180 360, 340 380, 520 440 C 660 490, 760 470, 800 450 L 800 620 L 0 620 Z" fill="#5b7a6b"/>
+  <path d="M0 500 C 200 440, 420 470, 640 520 C 720 540, 780 530, 800 525 L 800 620 L 0 620 Z" fill="#3f5e52"/>
+  <g stroke="#f5efe6" stroke-width="10" fill="none" stroke-linecap="round">
+    <path d="M150 560 C 150 420, 190 340, 260 290"/>
+    <path d="M170 470 C 200 470, 230 450, 240 420"/>
+    <path d="M165 400 C 195 405, 225 385, 235 355"/>
+  </g>
+  <circle cx="90" cy="120" r="6" fill="#c97b5a" opacity="0.5"/>
+  <circle cx="360" cy="90" r="5" fill="#c97b5a" opacity="0.4"/>
+  <circle cx="480" cy="300" r="5" fill="#3f5e52" opacity="0.35"/>
+  <circle cx="700" cy="380" r="6" fill="#f5efe6" opacity="0.6"/>
+</svg>

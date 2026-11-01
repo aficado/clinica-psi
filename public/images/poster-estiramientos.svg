@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="Ilustración de estiramientos">
+  <rect width="640" height="360" fill="#dce7e0"/>
+  <path d="M0 290 C 160 250, 320 270, 480 300 C 560 315, 610 305, 640 300 L 640 360 L 0 360 Z" fill="#3f5e52"/>
+  <g fill="none" stroke="#5b7a6b" stroke-width="14" stroke-linecap="round">
+    <path d="M250 240 C 250 190, 290 160, 340 165"/>
+    <path d="M250 240 C 220 210, 200 170, 215 135"/>
+    <path d="M340 165 C 390 175, 410 210, 400 245"/>
+  </g>
+  <circle cx="215" cy="112" r="20" fill="#5b7a6b"/>
+  <circle cx="470" cy="110" r="14" fill="#c97b5a"/>
+</svg>

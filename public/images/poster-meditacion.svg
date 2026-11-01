@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="Ilustración de meditación">
+  <rect width="640" height="360" fill="#dce7e0"/>
+  <circle cx="320" cy="180" r="120" fill="none" stroke="#5b7a6b" stroke-width="6" opacity="0.5"/>
+  <circle cx="320" cy="180" r="80" fill="none" stroke="#5b7a6b" stroke-width="6" opacity="0.7"/>
+  <circle cx="320" cy="180" r="42" fill="#3f5e52"/>
+  <path d="M320 120 C 300 90, 270 80, 250 96 C 240 112, 258 128, 282 126 C 300 124, 312 114, 320 120 Z" fill="#c97b5a"/>
+  <path d="M320 120 C 340 90, 370 80, 390 96 C 400 112, 382 128, 358 126 C 340 124, 328 114, 320 120 Z" fill="#c97b5a"/>
+</svg>
