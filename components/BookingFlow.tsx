@@ -484,14 +484,30 @@ export function BookingFlow({
                 ))}
               </div>
             )}
-            <Button variant="ghost" className="mt-6" onClick={() => setStep(1)}>
-              Volver
-            </Button>
           </section>
         ) : null}
 
         {step === 3 && service && pro ? (
           <section aria-labelledby="bk-paso4">
+            {/* PB-1 (R4-B-BUG-1): la fila de acciones va ARRIBA del paso. */}
+            <div className="mb-5 flex flex-wrap gap-3">
+              <Button variant="ghost" onClick={() => setStep(2)}>
+                Volver
+              </Button>
+              {dateIso && hour !== null ? (
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    setError(null);
+                    // Paso 4 real = "Tus datos" (0=Servicio … 3=Horario, 4=Datos).
+                    setStep(4);
+                    writeState({ step: 4 });
+                  }}
+                >
+                  Continuar
+                </Button>
+              ) : null}
+            </div>
             <h2 id="bk-paso4" className="text-xl">
               ¿Cuándo?
             </h2>
@@ -507,32 +523,17 @@ export function BookingFlow({
                 onSelect={pickDateAndHour}
                 onNavigate={(m) => setMonthIso(m)}
               />
-              {/* Volver SIEMPRE visible (corrección ronda 15): antes la persona
-                  que llegaba al calendario sin elegir fecha/hora se quedaba
-                  atrapada — el botón vivía dentro del `dateIso && hour` check. */}
-              <div className="mt-8 flex flex-wrap gap-3">
-                <Button variant="ghost" onClick={() => setStep(2)}>
-                  Volver
-                </Button>
-                {dateIso && hour !== null ? (
-                  <Button
-                    variant="primary"
-                    onClick={() => {
-                      setError(null);
-                      // Paso 4 real = "Tus datos" (0=Servicio … 3=Horario, 4=Datos).
-                      setStep(4);
-                      writeState({ step: 4 });
-                    }}
-                  >
-                    Continuar
-                  </Button>
-                ) : null}
-              </div>
             </Card>
           </section>
         ) : null}
         {step === 4 && service && pro && modality && dateIso && hour !== null ? (
           <form onSubmit={submit} noValidate>
+            {/* PB-1 (R4-B-BUG-1): el botón Volver sube al inicio del paso. */}
+            <div className="mb-5 flex flex-wrap gap-3">
+              <Button variant="ghost" type="button" onClick={() => setStep(3)}>
+                Volver
+              </Button>
+            </div>
             <h2 id="bk-paso5" className="text-xl">
               Tus datos
             </h2>
@@ -616,14 +617,9 @@ export function BookingFlow({
               </label>
             </div>
 
-            <div className="mt-6 flex flex-wrap gap-3">
-              <Button variant="ghost" type="button" onClick={() => setStep(3)}>
-                Volver
-              </Button>
-              <Button type="submit" variant="primary" disabled={submitting}>
-                {submitting ? "Registrando…" : "Confirmar cita"}
-              </Button>
-            </div>
+            <Button type="submit" variant="primary" disabled={submitting}>
+              {submitting ? "Registrando…" : "Confirmar cita"}
+            </Button>
           </form>
         ) : null}
 
