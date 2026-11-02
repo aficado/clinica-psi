@@ -1,13 +1,26 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { clinic } from "@/lib/data";
 import type { Professional, Service } from "@/lib/data";
 import { professionalsFor } from "@/lib/slots";
-import type { DaySlots } from "@/lib/schedule";
-import { bookAppointment, fetchAvailability } from "@/lib/schedule/actions";
+import { bookAppointment } from "@/lib/schedule/actions";
 import { cn, formatDateLongMX, timeLabel, waLink } from "@/lib/utils";
+import { setBookingState, getBookingState, clearBookingState } from "@/lib/cookies";
 import { Button, Card, Icon, TodoChip } from "./ui";
+import { CalendarView } from "./CalendarView";
+
+/** `Date` → `YYYY-MM-DD` en la zona horaria del navegador (para restaurar el estado de la agenda). */
+function localIso(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** Pasos que viven en cookies (`booking_state`): no se pierden al recargar o navegar (R4-B).
+ *  Máquina de pasos REAL (R4-A): 0=Servicio, 1=Modalidad, 2=Profesional, 3=Horario (calendario),
+ *  4=Tus datos; 5="done" NO se guarda (se alcanza solo con cita confirmada). */
+const COOKIE_STEP = 4;
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 interface BookingInitial {
   service?: string;
@@ -20,13 +33,6 @@ const STEPS = ["Servicio", "Modalidad", "Profesional", "Horario", "Tus datos"];
 const modLabel = (m: string) =>
   m === "enlinea" ? "En línea" : m === "presencial" ? "Presencial" : m;
 
-function shortDate(iso: string): string {
-  return new Date(`${iso}T12:00:00-06:00`).toLocaleDateString("es-MX", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-  });
-}
 
 interface NormalizedInitial {
   service: string | null;
@@ -55,13 +61,13 @@ function normalizeInitial(
 }
 
 /**
- * Flujo de reserva en 4 pasos (R4-A: 5.05 sobre la agenda REAL).
- * La disponibilidad se consulta al servidor (`fetchAvailability`) y la
- * cita se registra en la base de datos (`bookAppointment`) con
- * anti-doble-reserva transaccional (5.04). El enlace `/mi-cita/<token>`
- * funciona ahora desde cualquier dispositivo.
- * TODO (R4-D): confirmación por email con Resend cuando haya
- * credenciales (la cola `notifications` ya encola el pendiente).
+ * Flujo de reserva en 4 pasos (R4-A: 5.05 sobre la agenda REAL; R4-B: calendario de mes completo,
+ * cualquier día del año seleccionable + cookies `booking_state`).
+ * La disponibilidad la consulta el calendario (`CalendarView`, mes completo por acción) y la cita se
+ * registra en la base de datos (`bookAppointment`) con anti-doble-reserva transaccional (5.04). El
+ * enlace `/mi-cita/<token>` funciona ahora desde cualquier dispositivo.
+ * TODO (R4-D): confirmación por email con Resend cuando haya credenciales (la cola `notifications`
+ * ya encola el pendiente).
  */
 export function BookingFlow({
   initial,
@@ -90,60 +96,110 @@ export function BookingFlow({
   const [submitting, setSubmitting] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  // Disponibilidad real (5.03): se pide al servidor al llegar al paso 3.
-  const [availDays, setAvailDays] = useState<DaySlots[] | null>(null);
-  const [availLoading, setAvailLoading] = useState(false);
-  const [availError, setAvailError] = useState<string | null>(null);
-  const reqSeq = useRef(0);
+  // La disponibilidad la maneja `CalendarView` (mes completo al elegir el profesional); aquí solo se
+  // mantiene el mes visible para restaurarlo desde la cookie. D-R4-B-1: cualquier día es seleccionable.
+  const [monthIso, setMonthIso] = useState<string>(() => localIso(new Date()).slice(0, 7));
 
   const service = serviceSlug ? services.find((s) => s.slug === serviceSlug) ?? null : null;
   const pro = proId ? professionals.find((p) => p.id === proId) ?? null : null;
   const pros = service && modality ? professionalsFor(service, modality, professionals) : [];
-
-  useEffect(() => {
-    if (step !== 3 || !serviceSlug || !proId) return;
-    const seq = ++reqSeq.current;
-    setAvailLoading(true);
-    setAvailError(null);
-    fetchAvailability(serviceSlug, proId)
-      .then((res) => {
-        if (seq !== reqSeq.current) return;
-        if (res.ok) setAvailDays(res.days);
-        else {
-          setAvailDays(null);
-          setAvailError(res.error);
-        }
-      })
-      .catch(() => {
-        if (seq !== reqSeq.current) return;
-        setAvailError("No pudimos consultar la disponibilidad. Revisa tu conexión e inténtalo otra vez.");
-      })
-      .finally(() => {
-        if (seq === reqSeq.current) setAvailLoading(false);
-      });
-  }, [step, serviceSlug, proId]);
-
-  const dates = useMemo(() => {
-    if (!availDays) return [];
-    return availDays
-      .filter((d) => d.hours.some((h) => !h.taken))
-      .slice(0, 14)
-      .map((d) => [d.dateIso, d.hours.filter((h) => !h.taken).length] as [string, number]);
-  }, [availDays]);
-
-  const dayHours = useMemo(() => {
-    if (!dateIso || !availDays) return [];
-    return availDays.find((d) => d.dateIso === dateIso)?.hours ?? [];
-  }, [availDays, dateIso]);
 
   function clearDownstream(resetFrom: "service" | "mode" | "pro") {
     if (resetFrom !== "pro") setProId(null);
     if (resetFrom !== "pro" && resetFrom !== "mode") setModality(null);
     setDateIso(null);
     setHour(null);
-    setAvailDays(null);
-    setAvailError(null);
     setError(null);
+  }
+
+  /** Guardar lo que lleva el paciente para no perderlo si recarga o va a `/privacidad` (R4-B).
+   *  Las llaves con `null` se BORRAN (misma firma: `dateIso: null` limpia la fecha guardada). */
+  function writeState(partial: Record<string, unknown>): void {
+    setBookingState({ ...getBookingState(), ...partial });
+  }
+
+  /** Leer el estado guardado al montar (`booking_state`); `{}` si no hay nada usable. */
+  function cookieState(): Record<string, unknown> {
+    const saved = getBookingState();
+    if (!saved || typeof saved !== "object" || Object.keys(saved).length === 0) return {};
+
+    // Validar contra el catálogo ACTUAL: el servicio/profesional pudo haber cambiado desde
+    // que se guardó; algo invalidado se descarta en cadena (menor dato → menor paso).
+    const svc =
+      typeof saved.serviceSlug === "string"
+        ? services.find((s) => s.slug === saved.serviceSlug) ?? null
+        : null;
+    if (!svc) return {};
+
+    const modality =
+      typeof saved.modality === "string" &&
+      (saved.modality === "presencial" || saved.modality === "enlinea") &&
+      svc.modalities.includes(saved.modality)
+        ? (saved.modality as "presencial" | "enlinea")
+        : null;
+    const proId =
+      modality &&
+      typeof saved.proId === "string" &&
+      professionalsFor(svc, modality, professionals).some((p) => p.id === saved.proId)
+        ? (saved.proId as string)
+        : null;
+    const dateIso =
+      typeof saved.dateIso === "string" && ISO_DATE_RE.test(saved.dateIso)
+        ? saved.dateIso
+        : null;
+    const hour =
+      typeof saved.hour === "number" &&
+      Number.isInteger(saved.hour) &&
+      saved.hour >= 0 &&
+      saved.hour <= 23 &&
+      dateIso
+        ? (saved.hour as number)
+        : null;
+    const monthIso =
+      typeof saved.monthIso === "string" && /^\d{4}-\d{2}$/.test(saved.monthIso)
+        ? (saved.monthIso as string)
+        : dateIso
+          ? dateIso.slice(0, 7)
+          : null;
+
+    // Paso guardado, CLAMPEADO a los pasos reales (0–4; el paso 5 "done" no se restaura).
+    let st =
+      typeof saved.step === "number" && Number.isInteger(saved.step) ? saved.step : 0;
+    st = Math.min(Math.max(st, 0), COOKIE_STEP);
+    if (st >= 4 && hour === null) st = 3;
+    if (st >= 3 && proId === null) st = 2;
+    if (st >= 2 && modality === null) st = 1;
+    st = Math.min(Math.max(st, 1), COOKIE_STEP);
+
+    return { ...saved, serviceSlug: svc.slug, modality, proId, dateIso, hour, monthIso, step: st };
+  }
+
+  useEffect(() => {
+    const saved = cookieState();
+    if (Object.keys(saved).length === 0) return;
+    if (typeof saved.serviceSlug === "string") setServiceSlug(saved.serviceSlug);
+    setModality((saved.modality as "presencial" | "enlinea" | null) ?? null);
+    setProId((saved.proId as string | null) ?? null);
+    setDateIso((saved.dateIso as string | null) ?? null);
+    setHour((saved.hour as number | null) ?? null);
+    if (typeof saved.monthIso === "string") setMonthIso(saved.monthIso);
+    if (typeof saved.step === "number") setStep(saved.step);
+    // Re-normalizar la cookie: nada de lo invalidado sobrevive (R4-B).
+    setBookingState({
+      serviceSlug: saved.serviceSlug,
+      modality: saved.modality ?? null,
+      proId: saved.proId ?? null,
+      dateIso: saved.dateIso ?? null,
+      hour: saved.hour ?? null,
+      monthIso: saved.monthIso ?? null,
+      step: saved.step,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** Mes visible al elegir el profesional (usado por `CalendarView`). */
+  function monthFor(iso: string | null): string {
+    return iso ? iso.slice(0, 7) : localIso(new Date());
   }
 
   function pickService(slug: string) {
@@ -151,27 +207,43 @@ export function BookingFlow({
     if (!svc) return;
     clearDownstream("service");
     setServiceSlug(slug);
-    if (svc.modalities.length === 1) setModality(svc.modalities[0]);
-    setStep(svc.modalities.length === 1 ? 2 : 1);
+    const single = svc.modalities.length === 1;
+    if (single) setModality(svc.modalities[0]);
+    const nextStep = single ? 2 : 1;
+    setStep(nextStep);
+    // La cookie se escribe completa: lo que trae queda invalidado por el nuevo servicio.
+    writeState({
+      serviceSlug: slug,
+      modality: single ? svc.modalities[0] : null,
+      proId: null,
+      dateIso: null,
+      hour: null,
+      step: nextStep,
+    });
   }
 
   function pickModality(m: "presencial" | "enlinea") {
     clearDownstream("mode");
     setModality(m);
     setStep(2);
+    writeState({ modality: m, proId: null, dateIso: null, hour: null, step: 2 });
   }
 
   function pickPro(id: string) {
     clearDownstream("pro");
     setProId(id);
     setStep(3);
+    writeState({ proId: id, dateIso: null, hour: null, step: 3 });
   }
 
-  function pickDate(iso: string) {
+  /** Selecciona día y hora desde el calendario (R4-B): se queda en el paso 3 (el "Cuándo"); se
+   *  pasa al paso 4 "Tus datos" con el botón Continuar. */
+  function pickDateAndHour(iso: string, hour: number) {
     setError(null);
     setDateIso(iso);
-    const first = availDays?.find((d) => d.dateIso === iso)?.hours.find((h) => !h.taken);
-    setHour(first ? first.hour : null);
+    setHour(hour);
+    setMonthIso(monthFor(iso));
+    writeState({ dateIso: iso, hour, step: 3, monthIso: monthFor(iso) });
   }
 
   async function submit(e: React.FormEvent) {
@@ -194,20 +266,19 @@ export function BookingFlow({
       });
       if (!res.ok) {
         setError(res.error);
-        // Si el slot se ocupó mientras tanto, refrescar la disponibilidad.
+        // Si el slot se ocupó mientras tanto, borrar la selección para pedir otro (el
+        // calendario vuelve a consultar al montarse de nuevo).
         if (res.error.includes("horario")) {
           setHour(null);
-          setAvailDays(null);
-          reqSeq.current++;
-          const seq = reqSeq.current;
-          fetchAvailability(service.slug, pro.id).then((r) => {
-            if (seq === reqSeq.current && r.ok) setAvailDays(r.days);
-          });
+          setDateIso(null);
         }
         return;
       }
       setDone({ token: res.token ?? "" });
       setStep(5);
+      // Cita confirmada: el estado guardado ya no representa nada (y así una
+      // recarga de la página de confirmación no restaura el flujo viejo).
+      clearBookingState();
     } catch {
       setError("No pudimos registrar la cita. Revisa tu conexión e inténtalo otra vez.");
     } finally {
@@ -216,6 +287,7 @@ export function BookingFlow({
   }
 
   function reset() {
+    clearBookingState();
     setDone(null);
     setStep(0);
     setServiceSlug(null);
@@ -230,8 +302,6 @@ export function BookingFlow({
     setConsent(false);
     setError(null);
     setCopied(false);
-    setAvailDays(null);
-    setAvailError(null);
   }
 
   async function copyLink() {
@@ -334,6 +404,12 @@ export function BookingFlow({
 
         {step === 1 && service ? (
           <section aria-labelledby="bk-paso2">
+            {/* PB-1 (R4-B-BUG-1): "Volver" arriba de todo el paso, no al pie. */}
+            <div className="mb-5 flex flex-wrap gap-3">
+              <Button variant="ghost" onClick={() => setStep(0)}>
+                Volver
+              </Button>
+            </div>
             <h2 id="bk-paso2" className="text-xl">
               ¿Presencial o en línea?
             </h2>
@@ -357,13 +433,16 @@ export function BookingFlow({
                 </button>
               ))}
             </div>
-            <Button variant="ghost" className="mt-6" onClick={() => setStep(0)}>
-              Volver
-            </Button>
           </section>
         ) : null}
         {step === 2 && service && modality ? (
           <section aria-labelledby="bk-paso3">
+            {/* PB-1 (R4-B-BUG-1): "Volver" arriba de todo el paso, no al pie. */}
+            <div className="mb-5 flex flex-wrap gap-3">
+              <Button variant="ghost" onClick={() => setStep(1)}>
+                Volver
+              </Button>
+            </div>
             <h2 id="bk-paso3" className="text-xl">
               ¿Con quién?
             </h2>
@@ -416,138 +495,40 @@ export function BookingFlow({
             <h2 id="bk-paso4" className="text-xl">
               ¿Cuándo?
             </h2>
-
-            {availLoading ? (
-              <p role="status" className="mt-4 text-ink-soft">
-                Consultando la agenda de {pro.name}…
-              </p>
-            ) : availError ? (
-              <Card className="mt-4 p-5">
-                <p>{availError}</p>
-                <Button variant="ghost" className="mt-4" onClick={() => setStep(2)}>
-                  Elegir otro profesional
+            <p className="mt-1 text-sm text-ink-soft">
+              Elige un día de la agenda de {pro.name}: los días fuera de su horario se ven pero no
+              se pueden seleccionar.
+            </p>
+            <Card className="mt-4 p-6">
+              <CalendarView
+                proId={pro.id}
+                dateIso={dateIso}
+                hour={hour}
+                onSelect={pickDateAndHour}
+                onNavigate={(m) => setMonthIso(m)}
+              />
+              {/* Volver SIEMPRE visible (corrección ronda 15): antes la persona
+                  que llegaba al calendario sin elegir fecha/hora se quedaba
+                  atrapada — el botón vivía dentro del `dateIso && hour` check. */}
+              <div className="mt-8 flex flex-wrap gap-3">
+                <Button variant="ghost" onClick={() => setStep(2)}>
+                  Volver
                 </Button>
-              </Card>
-            ) : dates.length === 0 ? (
-              <Card className="mt-4 p-5">
-                <p>
-                  No hay cupos disponibles en los próximos 21 días para esta combinación.
-                  Puedes pedirnos horario por WhatsApp o probar con otro profesional.
-                </p>
-                <p className="mt-4">
-                  <a
-                    href={waLink(
-                      clinic.whatsappNumber,
-                      `Hola, quiero agendar ${service.name} (${modLabel(modality ?? "presencial")}) con ${pro.name} y no veo cupo en la página. ¿Puedes ayudarme?`,
-                    )}
-                    target="_blank"
-                    rel="noopener"
-                    className="btn inline-flex min-h-11 items-center gap-2 rounded-(--radius-btn) bg-terracotta px-5 py-2.5 font-semibold text-ink no-underline hover:bg-terracotta-dark"
-                  >
-                    <Icon name="whatsapp" className="h-4 w-4" />
-                    Pedir horario por WhatsApp
-                  </a>
-                </p>
-              </Card>
-            ) : (
-              <>
-                <h3 className="mt-4 text-lg">
-                  Elige el día
-                  <span className="ml-2 text-sm font-normal text-ink-soft">
-                    (el número entre paréntesis es la cantidad de horarios libres)
-                  </span>
-                </h3>
-                <div
-                  className="mt-3 flex flex-wrap gap-2"
-                  role="group"
-                  aria-label="Días con disponibilidad"
-                >
-                  {dates.map(([iso, freeCount]) => {
-                    const selected = iso === dateIso;
-                    return (
-                      <button
-                        key={iso}
-                        type="button"
-                        aria-pressed={selected}
-                        onClick={() => pickDate(iso)}
-                        className={cn(
-                          "min-h-11 rounded-(--radius-btn) border-2 px-4 py-2 text-sm font-semibold",
-                          selected
-                            ? "border-sage bg-sage text-white"
-                            : "border-sage/40 bg-white text-ink hover:border-sage hover:bg-sage/10",
-                        )}
-                      >
-                        {shortDate(iso)}
-                        <span
-                          className={cn(
-                            "ml-1 text-xs font-normal",
-                            selected ? "text-white/85" : "text-ink-soft",
-                          )}
-                        >
-                          ({freeCount})
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {dateIso ? (
-                  <>
-                    <h3 className="mt-8 text-lg">Elige la hora</h3>
-                    <p className="mt-1 text-sm text-ink-soft">
-                      Los horarios tachados ya están reservados por otras personas.
-                    </p>
-                    <div
-                      className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4"
-                      role="group"
-                      aria-label="Horarios del día"
-                    >
-                      {dayHours.map((s) => {
-                        const selected = hour === s.hour;
-                        return (
-                          <button
-                            key={s.hour}
-                            type="button"
-                            disabled={s.taken}
-                            aria-pressed={selected}
-                            aria-label={
-                              s.taken ? `Horario ${timeLabel(s.hour)}, ocupado` : timeLabel(s.hour)
-                            }
-                            onClick={() => setHour(s.hour)}
-                            className={cn(
-                              "min-h-11 rounded-(--radius-btn) border-2 px-2 py-2 text-sm font-semibold",
-                              s.taken
-                                ? "cursor-not-allowed border-mist bg-mist text-ink-soft line-through"
-                                : selected
-                                  ? "border-sage bg-sage text-white"
-                                  : "border-sage/40 bg-white text-ink hover:border-sage hover:bg-sage/10",
-                            )}
-                          >
-                            {timeLabel(s.hour)}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </>
-                ) : null}
-
-                <div className="mt-8 flex flex-wrap gap-3">
-                  <Button variant="ghost" onClick={() => setStep(2)}>
-                    Volver
-                  </Button>
+                {dateIso && hour !== null ? (
                   <Button
                     variant="primary"
-                    disabled={!dateIso || hour === null}
                     onClick={() => {
                       setError(null);
+                      // Paso 4 real = "Tus datos" (0=Servicio … 3=Horario, 4=Datos).
                       setStep(4);
+                      writeState({ step: 4 });
                     }}
                   >
                     Continuar
                   </Button>
-                </div>
-              </>
-            )}
+                ) : null}
+              </div>
+            </Card>
           </section>
         ) : null}
         {step === 4 && service && pro && modality && dateIso && hour !== null ? (

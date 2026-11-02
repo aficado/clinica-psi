@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cookies } from "next/headers";
-import { clinic, professionals, serviceCategories } from "@/lib/data";
+import { clinic, serviceCategories } from "@/lib/data";
+import { getProfessionals } from "@/lib/professionals";
 import { getFreeResource, getService } from "@/lib/content";
 import { getSessionProfile } from "@/lib/admin/session";
 import { canEditContent } from "@/lib/rbac";
@@ -50,7 +51,7 @@ export default async function ServiceDetailPage({ params, searchParams }: Props)
     preview = true;
   }
 
-  const pros = professionals.filter((p) => p.services.includes(s.slug));
+  const pros = getProfessionals().filter((p) => p.services.includes(s.slug));
   const rel = s.relatedResource ? getFreeResource(s.relatedResource) : undefined;
 
   return (

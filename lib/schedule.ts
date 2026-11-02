@@ -21,16 +21,26 @@
 // ============================================================
 
 import { randomBytes } from "node:crypto";
-import { clinic, professionals, type Professional } from "./data";
+import { clinic, type Professional } from "./data";
+import { getProfessionals } from "@/lib/professionals";
 import { getServices, getServicesAll } from "./content";
 import { professionalsFor } from "./slots";
 import { getDb } from "./db";
 
-export const BOOKING_WINDOW_DAYS = 21;
+/** Ventana de agendamiento (D-R4-B-5: decidir si es fija o editable desde Ajustes). Hoy se usa para la ventana que el admin puede abrir/cerrar. */
+export const BOOKING_WINDOW_DAYS = 365;
 
 export interface DaySlots {
   dateIso: string;
   hours: { hour: number; taken: boolean }[];
+}
+
+/** Motivo por el que un día no tiene horarios (fuera de regla / sin cupo). */
+export type DayReason = "no_atiende" | "sin_cupo" | null;
+
+export interface DaySlotsWithReason extends DaySlots {
+  reason: DayReason;
+  freeCount: number;
 }
 
 export type ApptStatus = "confirmada" | "cancelada" | "completada";
@@ -106,7 +116,8 @@ export type ScheduleResult = { ok: true; token?: string } | { ok: false; error: 
 // Utilidades de fecha/hora (locales, sin sorpresas de UTC)
 // ------------------------------------------------------------
 
-function isoLocal(d: Date): string {
+/** `Date` → `YYYY-MM-DD` en la zona del servidor (el calendario usa el día local). */
+export function isoLocal(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
@@ -146,7 +157,7 @@ export function seedRulesIfEmpty(): void {
       `INSERT INTO availability_rules (pro_id, day_of_week, open_hour, close_hour, active, created_at, updated_at)
        VALUES (?, ?, ?, ?, 1, ?, ?)`,
     );
-    for (const p of professionals) {
+    for (const p of getProfessionals()) {
       for (const dow of p.days) {
         const sat = dow === 6 ? p.saturday : undefined;
         ins.run(p.id, dow, sat?.open ?? p.open, sat?.close ?? p.close, now, now);
@@ -191,46 +202,84 @@ export function getCancellationCutoffHours(): number {
   return Number.isFinite(v) && v >= 0 ? Math.floor(v) : 24;
 }
 
-/** Slots del servicio+profesional para las próximas 21 días, con ocupación real (5.03/5.04). */
-export function openSlotsFor(
-  serviceSlug: string,
-  proId: string,
-  days = BOOKING_WINDOW_DAYS,
-): { ok: true; days: DaySlots[] } | { ok: false; error: string } {
-  seedRulesIfEmpty();
-  const svc = getServices().find((s) => s.slug === serviceSlug);
-  if (!svc) return { ok: false, error: "Ese servicio no está disponible ahora mismo." };
-  const pro = professionals.find((p) => p.id === proId);
-  if (!pro) return { ok: false, error: "Ese profesional no está disponible ahora mismo." };
+/** Regla activa del profesional en `dateIso` (incluye el sábado opcional). */
+export function getRule(proId: string, dateIso: string): RuleView | undefined {
+  const dow = hourOfIso(dateIso);
+  return getRules()
+    .filter((r) => r.active && r.proId === proId && r.dow === dow)
+    .find(() => true);
+}
 
-  const rules = new Map(getRules().filter((r) => r.active && r.proId === proId).map((r) => [r.dow, r]));
-  const first = addDaysIso(1);
-  const last = addDaysIso(days);
+/** ¿Tiene este día el profesional reglas (activo)? */
+function hasRule(proId: string, dateIso: string): boolean {
+  return getRule(proId, dateIso) !== undefined;
+}
+
+/** Ocupación confirmada de `proId` en una ventana de fechas (5.04). */
+function takenSet(proId: string, first: string, last: string): Set<string> {
   const takenRows = getDb()
     .prepare(
       `SELECT date, hour FROM appointments
        WHERE pro_id = ? AND status = 'confirmada' AND date BETWEEN ? AND ?`,
     )
     .all(proId, first, last) as unknown as Array<{ date: string; hour: number }>;
-  const taken = new Set(takenRows.map((t) => `${t.date}|${t.hour}`));
+  return new Set(takenRows.map((t) => `${t.date}|${t.hour}`));
+}
 
-  const blocks = Math.max(1, Math.ceil(svc.duration / 60));
-  const out: DaySlots[] = [];
-  for (let d = 1; d <= days; d++) {
-    const dateIso = addDaysIso(d);
-    const rule = rules.get(hourOfIso(dateIso));
-    if (!rule) continue;
-    const hours: { hour: number; taken: boolean }[] = [];
-    for (let h = rule.open; h + blocks <= rule.close; h++) {
-      hours.push({ hour: h, taken: taken.has(`${dateIso}|${h}`) });
-    }
-    if (hours.some((x) => !x.taken)) out.push({ dateIso, hours });
+/** Slots de un día concreto (5.03/5.04): la ventana se abre en el año completo. */
+export function daySlotsFor(dateIso: string, proId: string): DaySlotsWithReason {
+  const rule = getRule(proId, dateIso);
+  if (!rule)
+    return {
+      dateIso,
+      hours: [],
+      reason: "no_atiende",
+      freeCount: 0,
+    };
+
+  const yearMonth = dateIso.slice(0, 7);
+  const firstDayOfMonth = `${yearMonth}-01`;
+  const lastDayOfMonth = `${yearMonth}-${String(getLastDayOfMonth(dateIso)).padStart(2, "0")}`;
+  const taken = takenSet(proId, firstDayOfMonth, lastDayOfMonth);
+
+  const blocks = 1; // la duración del servicio ya se valida al agendar (`slotCandidateError`)
+  const hours: { hour: number; taken: boolean }[] = [];
+  for (let h = rule.open; h + blocks <= rule.close; h++) {
+    hours.push({ hour: h, taken: taken.has(`${dateIso}|${h}`) });
   }
-  return { ok: true, days: out };
+  return {
+    dateIso,
+    hours,
+    reason: hours.every((h) => h.taken) ? "sin_cupo" : null,
+    freeCount: hours.filter((h) => !h.taken).length,
+  };
+}
+
+/** Mes completo con la disponibilidad de cada día (5.03/5.10, usado por `/agendar` y el admin).
+ *  Acepta `YYYY-MM` o `YYYY-MM-DD` (solo se usan el año y el mes). */
+export function monthSchedule(proId: string, dateIso: string): DaySlotsWithReason[] {
+  const year = Number(dateIso.slice(0, 4));
+  const month = Number(dateIso.slice(5, 7));
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return [];
+  const yearMonth = `${year}-${String(month).padStart(2, "0")}`;
+  const lastDay = getLastDayOfMonth(`${yearMonth}-01`);
+  const out: DaySlotsWithReason[] = [];
+  for (let d = 1; d <= lastDay; d++) {
+    const dayIso = `${yearMonth}-${String(d).padStart(2, "0")}`;
+    out.push(daySlotsFor(dayIso, proId));
+  }
+  return out;
+}
+
+/** `YYYY-MM-DD` → el último día del mes (día 0 del mes siguiente = último día del actual). */
+function getLastDayOfMonth(dateIso: string): number {
+  const year = Number(dateIso.slice(0, 4));
+  const month = Number(dateIso.slice(5, 7));
+  return new Date(year, month, 0).getDate();
 }
 
 function proFor(serviceSlug: string): Professional | undefined {
-  return professionals.find((p) => p.services.includes(serviceSlug));
+  return getProfessionals().find((p) => p.services.includes(serviceSlug));
 }
 
 /** ¿`hour` es un candidato válido (regla activa, ventana, duración)? Devuelve error o null. */
@@ -245,7 +294,7 @@ function slotCandidateError(
   if (!Number.isInteger(hour) || hour < 0 || hour > 23) return "La hora no es válida.";
   const svc = getServices().find((s) => s.slug === serviceSlug);
   if (!svc) return "Ese servicio no está disponible ahora mismo.";
-  const pro = professionals.find((p) => p.id === proId);
+  const pro = getProfessionals().find((p) => p.id === proId);
   if (!pro) return "Ese profesional no está disponible ahora mismo.";
   if ((modality !== "presencial" && modality !== "enlinea") || !svc.modalities.includes(modality as "presencial" | "enlinea"))
     return "La modalidad no aplica a este servicio.";
@@ -273,7 +322,7 @@ export function saveRule(input: {
   active: boolean;
 }): { ok: true } | { ok: false; error: string } {
   seedRulesIfEmpty();
-  if (!professionals.some((p) => p.id === input.proId)) return { ok: false, error: "Profesional desconocido." };
+  if (!getProfessionals().some((p) => p.id === input.proId)) return { ok: false, error: "Profesional desconocido." };
   if (!Number.isInteger(input.dow) || input.dow < 0 || input.dow > 6) return { ok: false, error: "El día no es válido." };
   if (!Number.isInteger(input.open) || !Number.isInteger(input.close)) return { ok: false, error: "Las horas deben ser enteras." };
   if (input.open < 0 || input.open > 23 || input.close < 0 || input.close > 24)
@@ -500,7 +549,7 @@ function rowToView(r: AppointmentRow): AppointmentView {
   const start = startMs(r.date, r.hour);
   const now = Date.now();
   const svc = getServicesAll().find((s) => s.slug === r.service_slug);
-  const pro = professionals.find((p) => p.id === r.pro_id) ?? proFor(r.service_slug);
+  const pro = getProfessionals().find((p) => p.id === r.pro_id) ?? proFor(r.service_slug);
   return {
     token: r.token,
     serviceSlug: r.service_slug,

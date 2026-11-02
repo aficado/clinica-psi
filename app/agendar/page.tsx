@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { BookingFlow } from "@/components/BookingFlow";
 import { Reveal } from "@/components/Reveal";
-import { professionals } from "@/lib/data";
+import { getProfessionals } from "@/lib/professionals";
 import { getServices } from "@/lib/content";
 import { asString } from "@/lib/utils";
 
@@ -50,7 +50,7 @@ export default async function AgendarPage({
               pro: pro && pro !== "" ? pro : undefined,
             }}
             services={getServices()}
-            professionals={professionals}
+            professionals={getProfessionals()}
           />
         </div>
       </Reveal>

@@ -29,6 +29,8 @@ const navItems: Array<{
   { id: "dashboard", label: "Inicio", href: "/admin", icon: "spark", roles: ["admin", "therapist", "assistant"] },
   { id: "contenido", label: "Contenido", href: "/admin/contenido", icon: "book", roles: ["admin", "therapist"] },
   { id: "agenda", label: "Agenda", href: "/admin/horarios", icon: "calendar", roles: ["admin", "therapist"] },
+  { id: "profesionales", label: "Profesionales", href: "/admin/profesionales", icon: "user", roles: ["admin", "therapist"] },
+  { id: "servicios", label: "Servicios", href: "/admin/servicios", icon: "check", roles: ["admin", "therapist"] },
   { id: "multimedia", label: "Multimedia", href: "/admin/multimedia", icon: "video", roles: ["admin"] },
   { id: "enlaces", label: "Enlaces", href: "/admin/enlaces", icon: "link", roles: ["admin"] },
   { id: "testimonios", label: "Testimonios", href: "/admin/testimonios", icon: "heart", roles: ["admin"] },

@@ -14,7 +14,7 @@
 | UI | **React 19.1** | Componentes propios (`components/ui.tsx`); sin librerías de componentes |
 | Estilos | **Tailwind CSS 4.1** | Tokens en `@theme` de `globals.css`, sobreescritos en runtime por `theme_tokens` (BD) y por la paleta oscura (8.14) |
 | Fuentes | `next/font`: Fraunces + Inter | `display: swap`, variables CSS |
-| **BD local** | **`node:sqlite`** (Node ≥ 22) | `data/clinica-bienestar.db`, 15 tablas (12 + agenda R4-A), seed idempotente desde `lib/data.ts`; Supabase/RLS aplazados al despliegue (D-R4-1, `docs/BACKLOG-R4.md`) |
+| **BD local** | **`node:sqlite`** (Node ≥ 22) | `data/clinica-bienestar.db`, 16 tablas (12 + agenda R4-A + professionals R4-B-2), seed idempotente desde `lib/data.ts`; Supabase/RLS aplazados al despliegue (D-R4-1, `docs/BACKLOG-R4.md`) |
 | Sesión | HMAC-SHA256 stateless (`node:crypto`) | Cookie `rv_admin_session` (12 h); perfiles demo en `lib/admin/store.ts` (usuarios reales: Fase 4) |
 | QR | `qrcode` 1.5 | PNG/SVG en `QrWidget` (público y admin) |
 | Imagen OG | `sharp` (herramienta) | `scripts/make-og.mjs` → `public/images/og.png` |
@@ -25,7 +25,7 @@
 
 ---
 
-## 2. Inventario de archivos (125: 34 `app/` + 38 `components/` + 20 `lib/` + 3 `scripts/` + 11 `public/` + 10 raíz + 9 `docs/` + BD en `data/`)
+## 2. Inventario de archivos (134: 36 `app/` + 40 `components/` + 23 `lib/` + 3 `scripts/` + 11 `public/` + 10 raíz + 12 `docs/` + BD en `data/`)
 
 > Sin conteo de líneas por archivo: caducan cada ronda. El total ronda las ~14 000 líneas de código fuente.
 
@@ -41,7 +41,7 @@
 | `aprende/page.tsx` · `aprende/[slug]/page.tsx` | Blog (buscador + filtros) y artículo (TOC, tags, relacionados, disclaimer), preview |
 | `servicios/page.tsx` · `servicios/[slug]/page.tsx` | Catálogo (orden `position`) y ficha con FAQ, CTA deep-link, **JSON-LD `Service`** (4.06), preview de ocultos |
 | `cursos/page.tsx` · `cursos/[slug]/page.tsx` | Catálogo y ficha de curso con `EnrollmentForm`, preview de ocultos |
-| `agendar/page.tsx` | Flujo de reserva (4 pasos) con servicios de BD + profesionales de `lib/data`; disponibilidad REAL consultada por action (R4-A) |
+| `agendar/page.tsx` | Flujo de reserva (4 pasos) con servicios de BD + profesionales de BD (`getProfessionals()`); disponibilidad REAL consultada por action (R4-A) |
 | `mi-cita/[token]/page.tsx` | Página server: lee la cita de la BD por token (`getAppointmentByToken`, R4-A) → `MiCitaClient` (ver/cancelar/reprogramar) |
 | `nosotros/page.tsx` · `contacto/page.tsx` · `privacidad/page.tsx` | Estáticas de identidad/contacto (contacto: dinámica, mapa desde BD) y aviso LFPDPPP |
 | `links/page.tsx` | Link-in-bio (7.03): botones de `link_items` + QR con URL absoluta (`siteUrl()/links`) |
@@ -58,6 +58,8 @@
 | `admin/testimonios/page.tsx` | Cola de aprobación (8.10); solo admin |
 | `admin/auditoria/page.tsx` | Bitácora server-rendered con filtros GET (8.12); solo admin |
 | `admin/horarios/page.tsx` | **Agenda (R4-A, 5.10 parcial)**: citas + horarios por día; `getRules()`/`listAppointments()` server-rendered; RBAC `canManageSchedule` (admin+terapeuta) |
+| `admin/servicios/page.tsx` (R4-B-2) | **Vista dedicada de agenda** de los servicios: listado con duración/buffer/modalidades/visible y enlaces profundos al editor de Contenido (`/admin/contenido?tab=servicios&edit=<slug>`). No duplica la tabla `services` (decisión D-R4-B-2: un dato, un solo sitio); RBAC `canEditContent` |
+| `admin/profesionales/page.tsx` (nuevo, R4-B-2) | Alta/edición/activación/baja blanda de profesionales: nombre, rol, casillas de servicios, días + horario (sábado opcional), `inactivo`; guarda en `professionals` y **alinea** `availability_rules` al guardar; semilla demo desde `lib/data` si la BD está vacía; RBAC `canManageSchedule` |
 | `robots.ts` · `sitemap.ts` | Robots (bloquea `/admin`, `/mi-cita`) y sitemap **desde la BD** (solo publicado/visible, `lastmod` real); dominio `TODO:` |
 
 ### 2.2 `components/` — UI pública (22)
@@ -74,7 +76,9 @@
 | `cards.tsx` | Tarjetas de contenido + `categoryLabel` + `posterSrc` |
 | `AprendeCatalog` · `FreeCatalog` · `ServicesCatalog` · `CoursesCatalog` | Catálogos con filtros; reciben `items` de BD por props (taxonomías de `lib/data`) |
 | `Filters.tsx` | Píldoras de filtro reutilizables |
-| `BookingFlow.tsx` | Reserva 4 pasos (R4-A): disponibilidad real vía `fetchAvailability`, alta vía `bookAppointment` (BD, anti-doble-reserva); consentimiento; sin `localStorage` |
+| `BookingFlow.tsx` | Reserva 4 pasos (R4-A): disponibilidad real vía `fetchAvailability`, alta vía `bookAppointment` (BD, anti-doble-reserva); consentimiento; sin `localStorage`; **R4-B: persiste la programación en cookies** |
+| `CalendarView.tsx` (nuevo, R4-B) | Calendario de mes entero: navegación por años, grid 7 columnas Lun–Dom, día disponible con contador de horarios, día fuera de regla/inactivo con motivo; solo lectura de disponibilidad vía server actions |
+| `admin/ProfessionalsManager.tsx` (nuevo, R4-B-2) | Panel de profesionales: listado con estado, alta/edición (nombre, rol, servicios check-list, días + horario, sábado opcional), activar/desactivar, baja blanda con confirmación; llama `lib/professionals/actions` |
 | `MiCitaClient.tsx` | Ver/cancelar/reprogramar la cita desde el enlace único (acciones de BD; cutoff 24 h provisional) |
 | `EnrollmentForm.tsx` · `ContactForm.tsx` · `ShareButtons.tsx` | Formularios demo (WhatsApp) y compartir/copiar |
 | `VideoEmbed.tsx` · `WhatsAppFloat.tsx` | Embed YouTube/Vimeo; botón flotante |
@@ -85,7 +89,7 @@
 
 | Archivo | Qué hace |
 |---|---|
-| `AdminShell.tsx` | Sidebar filtrada por rol + `ThemeToggle` (sidebar y barra móvil); "Próximamente": Usuarios/Ajustes |
+| `AdminShell.tsx` | Sidebar filtrada por rol + `ThemeToggle` (sidebar y barra móvil); R4-B: módulos **Servicios**/ **Profesionales**; "Próximamente": Usuarios/Ajustes |
 | `AdminProvider.tsx` · `ProfileProvider.tsx` · `RoleGuard.tsx` | Contextos de sesión/perfil (SSR + `localStorage`) y guard de UI por rol (defensa débil) |
 | `ContentHub.tsx` | Hub de 4 pestañas: estados, mostrar/ocultar, reordenar ↑↓, "Ver" con preview, borrar (admin) con **"Deshacer"** |
 | `content/ui.tsx` | Helpers de formularios: `Field`/`T`/`Sel`/`Chk`/`SaveBar`, `ytId`, `parseSections`/`sectionsToText` (cuerpo con `# ` y párrafos), `parseFaq`, `msToLocal`/`localToMs` |
@@ -101,11 +105,13 @@
 
 | Archivo | Qué hace |
 |---|---|
-| `db.ts` | Conexión y esquema (`node:sqlite`; `LOCAL_DB_PATH` sobreescribe): 15 tablas + migraciones `ALTER` comprobadas (`media_assets.deleted_at`; `site_settings.map_type/map_query/map_url`; `site_settings.cancel_cutoff_hours`) + índices únicos parciales de agenda; `references` entre comillas |
+| `db.ts` | Conexión y esquema (`node:sqlite`; `LOCAL_DB_PATH` sobreescribe): 16 tablas + migraciones `ALTER` comprobadas (`media_assets.deleted_at`; `site_settings.map_type/map_query/map_url`; `site_settings.cancel_cutoff_hours`) + índices únicos parciales de agenda; `references` entre comillas |
 | `content.ts` | Capa de datos (SOLO servidor): tipos fila/vista, `seedIfEmpty()`, lectores públicos y `...All`, mutadores validados que devuelven `SaveResult` (contenido, testimonios, enlaces, menú, redes, **`saveMapSettings`**), utilidades (`isLiveStatus`, `validSlug`, `validVideo`, `validHref`) |
 | `content/actions.ts` | Server actions: `currentProfile()` + RBAC por acción + `logAudit` + `invalidate(...)`; incluye `saveMap` |
-| `schedule.ts` | **Agenda real (R4-A)**, solo servidor: reglas por pro/día (`seedRulesIfEmpty` desde `lib/data`), `openSlotsFor` (reglas − ocupación real), `createAppointment`/`rescheduleAppointment` (BEGIN IMMEDIATE + `ux_appt_slot` = 5.04), `cancelAppointment` (cutoff `cancel_cutoff_hours`, D-R4-3), `getAppointmentByToken`/`listAppointments`/`countUpcoming`, cola `notifications`, `saveRule`/`deleteRule` |
+| `schedule.ts` | **Agenda real (R4-A; R4-B en construcción)**: reglas por pro/día (`seedRulesIfEmpty` desde `lib/data`), `openSlotsFor`/`daySlotsFor` (reglas − ocupación real), `createAppointment`/`rescheduleAppointment` (BEGIN IMMEDIATE + `ux_appt_slot` = 5.04), `cancelAppointment` (cutoff `cancel_cutoff_hours`, D-R4-3), `getAppointmentByToken`/`listAppointments`/`countUpcoming`, cola `notifications`, `saveRule`/`deleteRule`; **R4-B: `getProfessionalSchedule`, `monthSchedule` para la vista anual** |
 | `schedule/actions.ts` | Server actions de agenda: públicas (`fetchAvailability`, `bookAppointment`, `cancelMyAppointment`, `rescheduleMyAppointment` — credencial = token del enlace) y de panel (`saveAvailabilityRule`, `deleteAvailabilityRule`, `adminCancelAppointment` — sesión + `canManageSchedule` + auditoría) |
+| `services/admin.ts` (nuevo, R4-B) | Servicios de la agenda: CRUD desde el panel, slug inmutable, baja lógica; lee/actualiza `service_catalog` en BD |
+| `professionals.ts` (nuevo, R4-B-2) | Profesionales de la agenda: capa de lectura de la tabla `professionals` (identidad) al tipo `Professional`; semilla demo desde `lib/data` si la BD está vacía; `getProfessionals()` (activos) y `getProfessionalsAll()` (panel); `upsertRulesForPro` alinea `availability_rules` con el perfil al guardar |
 | `audit.ts` | `logAudit` + `getAuditLogs` (filtros, máx. 300) |
 | `rbac.ts` | `canAdmin` / `canEditContent` (admin+therapist) / `canManageSchedule` (admin+therapist, R4-A) / `canEditAppearance` / `canManageMedia` |
 | `themes.ts` · `themes-core.ts` · `fonts.ts` | Tema en BD (`theme_tokens`; `getThemeTokens` devuelve copia PLANA), valores por defecto client-safe, fuentes curadas |
@@ -136,7 +142,7 @@
 
 ---
 
-## 3. Rutas (31)
+## 3. Rutas (33)
 
 | Ruta | Tipo | Epica |
 |---|---|---|
@@ -153,7 +159,7 @@
 ### 4.1 Flujo de datos
 
 ```
-lib/data.ts (seed) ─seedIfEmpty()→ lib/db.ts (SQLite 15 tablas) ─┬→ lib/content.ts (lectores)  → app/*/page.tsx (RSC) → HTML
+lib/data.ts (seed) ─seedIfEmpty()→ lib/db.ts (SQLite 16 tablas) ─┬→ lib/content.ts (lectores)  → app/*/page.tsx (RSC) → HTML
                                                                  ├→ lib/content/actions.ts
                                                                  └→ lib/schedule.ts (agenda: reglas − ocupación) → /agendar, /mi-cita, /admin/horarios
    components/* ──(acciones)──▶ [público: token del enlace | panel: RBAC(currentProfile)] → mutador validado (TX) → logAudit → invalidate(paths)
@@ -204,7 +210,7 @@ login → cookie rv_admin_session → layout valida sesión → AdminShell (nav 
 - **Modo oscuro (8.14):** `html.dark` sobreescribe los tokens con `!important` (ganan a los inline del admin) + overrides de utilidades por ROL (`.bg-white`, `.bg-sage`, `.bg-terracotta`, `.text-mist*`, hovers) porque un token es superficie en unos componentes y texto en otros.
 - **Mapa (8.15):** los 4 tipos (placeholder/embed/iframe/enlace) existen porque la dirección real sigue sin definir (D1–D8).
 
-### 4.6 Modelo de datos (15 tablas)
+### 4.6 Modelo de datos (16 tablas)
 
 | Tabla | Claves/notas |
 |---|---|

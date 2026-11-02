@@ -9,12 +9,13 @@
 > **2026-11-01:** Eliminación masiva: GGUF `liquid/LFM2.5-24B-A2B-QAD-Q4_0` (13,6 GB) y `Spark-X2.6-4B-Q8_0` (4,1 GB); proyecto `strata/` (~64 GB); 5 repos del hub HF (`MiniMax-H3`, `MiniMax-H3-FP8`, `Nemotron-3.5-Bolt-74B-A9B-GGUF` + variante BF16, `Ornith-1.5-122B`, `LTX-2.5-FP8`) con purga de blobs huérfanos (hub pasó de 114 GB a ~140 KB). HDD: 359→228 GB usados (≈131 GB liberados).
 > **2026-11-01 (2.ª ronda):** el resto de GGUF sueltos (§2) también se eliminó y el directorio `gguf/` desapareció por completo (Qwen3.8-27B, Huihui, Swift, Ornith-1.5-35B, flint-UD, Nemotron-E4B). Re-descargado `InternScience/Sage-A1.5-Q4_K_M-GGUF` con `hf download --include "Sage-A1.5-Q4_K_M.gguf" --local-dir` (21,7 GB, SHA-256 validado por el CLI); recreado `/mnt/models/gguf/`. El `mmproj` de visión NO se descargó (el script usa `--no-mmproj`). HDD re-medido: 129 GB / 1,6 T libres (8 %).
 > **2026-11-01 (3.ª ronda, auditoría completa):** documentados como no documentados antes: `awq/` (18 GB: Nemotron-3.5-Bolt-E4B-W4A16 + gemma-4-E4B-it-AWQ, safetensors), `raw/NVIDIA-Nemotron-3.5-Bolt-E4B-BF16/` (15 GB), `tools/venv-quant/` (11 GB) y `tools/venv-rag/` (1,4 GB). Corregido: en el hub NO queda ningún GGUF real (el de Nemotron-E4B-4GB es un **symlink roto** a blob purgado); `~/.unsloth/` del SSD pesa 11 GB; scripts de arranque de `~/` con su estado (⛔ solo `start_sage_server_fast.sh` tiene modelo); `~/.local/bin/ft` ya no existe (limpiado); SSD re-medido 76 GB / 27 G libres. §2 tree re-escrito; §3 home y scripts actualizados; §8 tamaños re-medidos.
+> **2026-11-01 (4.ª ronda):** re-descargado `ornith-ai/Ornith-1.5-35B-A3B-GGUF` → `gguf/Ornith-1.5-35B-Q4_K_M.gguf` (21,7 GB, SHA-256 validado por el CLI; solo pesos, mmproj de visión NO descargado). HDD: 149 GB / 1,6 T (9 %). Segundo GGUF en `gguf/`, junto a `Sage-A1.5-Q4_K_M.gguf`. Scripts Ornith de `~/` vuelven a estar operativos (§3).
 
 ## 1. Discos (medido 2026-10-19; re-medido 2026-11-01)
 
 | Disco | Modelo | Montado | Uso / Libre |
 |---|---|---|---|
-| `sda` | WDC WD22PURZ, 2 TB (1,8T visibles) | `/mnt/models` | 129 GB (8 %) / 1,6 T |
+| `sda` | WDC WD22PURZ, 2 TB (1,8T visibles) | `/mnt/models` | 149 GB (9 %) / 1,6 T |
 | `sdc` | ADATA SU650, 120 GB (107G LVM) | `/` (LVM), `/boot`, `/boot/efi` | 76 GB (75 %) / 27 G |
 | `sdb` | ST2000DM008, 2 TB | ⛔ sin montar — **Windows** | — |
 | `sdd` | WD Green 2.5", 1 TB | ⛔ sin montar — **Windows** | — |
@@ -31,7 +32,8 @@
 ```
 /mnt/models/
 ├── gguf/                         🧠 GGUF sueltos (llama.cpp) — recreado el 2026-11-01 tras quedar vacío
-│   └── Sage-A1.5-Q4_K_M.gguf                             21,7 GB  (MoE qwen35moe ~35B / 3B activos; solo pesos, sin mmproj de visión)
+│   ├── Sage-A1.5-Q4_K_M.gguf                             21,7 GB  (MoE qwen35moe ~35B / 3B activos; solo pesos, sin mmproj de visión)
+│   └── Ornith-1.5-35B-Q4_K_M.gguf                        21,7 GB  (MoE qwen3_5_moe 35B-A3B; re-descargado 2026-11-01; solo pesos, sin mmproj)
 ├── huggingface/                  📥 caché HF/Unsloth (HF_HOME)
 │   ├── hub/                     models--org/nombre/ (13 repos, solo metadata y blobs pequeños; ~26 MB; §2.1)
 │   └── xet/                     caché XET (11 MB)
@@ -102,7 +104,7 @@
 > **2026-10-28 — no documentados en esta tabla pero presentes:** symlinks `strata` (`~/.local/share/strata/terminal/current/bin/strata`; **aún existe** aunque el proyecto `/mnt/models/strata` se eliminó 2026-11-01 — el CLI vive en `~/.local/share/strata/`, 1,4 GB), `unsloth` (`~/.unsloth/studio/.../bin/unsloth`), `hf` (`~/.hf-cli/venv/bin/hf`), `python3.12` (uv), y los binarios `cloudflared`, `uv`, `uvx`. El symlink roto `~/.local/bin/ft` reportado el 2026-10-28 **ya no existe** (limpiado).
 
 **Scripts de arranque (en `~/`)** — llama.cpp vainilla, puerto 8080, modelo en `/mnt/models/gguf/`.
-> Estado 2026-11-01: **solo `start_sage_server_fast.sh` tiene modelo descargado**; el resto apuntan a GGUF eliminados en la limpieza (⛔).
+> Estado 2026-11-01: **funcionan** `start_sage_server_fast.sh` y los 3 de Ornith (modelos re-descargados); el resto apuntan a GGUF eliminados en la limpieza (⛔).
 
 | Script | Modelo | Flags clave |
 |---|---|---|
@@ -111,9 +113,9 @@
 | `run-huihui-qwen3.8-27b.sh` | `Huihui-…-abliterated-UD-IQ4_XS` | ⛔ sin modelo · check de VRAM |
 | `start_swift_server.sh` | `Swift-1.5-…-GSQ-RCO-IQ3_S-mtp` | ⛔ sin modelo · ctx 128k, KV q8_0/q4_0 |
 | `start_lfm_server.sh` | `liquid/LFM2.5-24B-A2B-QAD-Q4_0` | ⛔ sin modelo · ctx 131k, muestreo oficial, reasoning 8192 |
-| `start_ornith_server.sh` | `Ornith-1.5-35B-Q4_K_M` | ⛔ sin modelo · ctx 128k, `--cpu-moe`, flash-attn (no arrancar con Swift) |
-| `start_ornith_server_fast.sh` | idem Ornith | ⛔ sin modelo · `--fit on --fit-target 512` (auto-reparto de expertos), reasoning 2048, API key |
-| `start_ornith_server_256k.sh` | idem Ornith | ⛔ sin modelo · ctx 256k |
+| `start_ornith_server.sh` | `Ornith-1.5-35B-Q4_K_M` | ✅ **funciona** — re-descargado 2026-11-01 · ctx 128k, `--cpu-moe`, flash-attn (no arrancar con Swift) |
+| `start_ornith_server_fast.sh` | idem Ornith | ✅ **funciona** — re-descargado 2026-11-01 · `--fit on --fit-target 512` (auto-reparto de expertos), reasoning 2048, API key |
+| `start_ornith_server_256k.sh` | idem Ornith | ✅ **funciona** — re-descargado 2026-11-01 · ctx 256k |
 | `start_flint_server.sh` / `_fast.sh` | `flint-UD-Q4_K_XL` | ⛔ sin modelo · usa build `tools/llama.cpp-flint` |
 | `start_spark_server.sh` | `Spark-X2.6-4B-Q8_0` | ⛔ sin modelo · MoE 4B |
 | `start_nemotron_bolt_server.sh` | `Nemotron-3.5-Bolt-E4B-Q4_K_M` | ⛔ sin modelo (hub: symlink roto; hay Safetensors en `awq/` y `raw/`) · ctx 64k, `--cpu-moe` |

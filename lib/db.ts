@@ -341,6 +341,29 @@ function ensureSchema(conn: DatabaseSync): void {
     );
   `);
 
+  // Profesionales de la agenda (R4-B-1/R4-B-2: 5.03/5.10). La tabla guarda la
+  // IDENTIDAD (perfil) del profesional: los horarios que usa el motor siguen
+  // viniendo de `availability_rules` (última palabra) — guardar los días y
+  // horas aquí en columnas permite sembrar reglas nuevas al dar de alta un
+  // profesional desde el panel, y que siempre queden coherentes.
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS professionals (
+      id            TEXT PRIMARY KEY,
+      name          TEXT NOT NULL,
+      role          TEXT NOT NULL DEFAULT '',
+      services_json TEXT NOT NULL DEFAULT '[]',
+      days_json     TEXT NOT NULL DEFAULT '[]',
+      open_hour     INTEGER NOT NULL DEFAULT 9,
+      close_hour    INTEGER NOT NULL DEFAULT 17,
+      sat_open      INTEGER,
+      sat_close     INTEGER,
+      active        INTEGER NOT NULL DEFAULT 1,
+      created_at    INTEGER NOT NULL,
+      updated_at    INTEGER NOT NULL,
+      deleted_at    INTEGER
+    );
+  `);
+
   // 5.07 (D4 pendiente de decisión del dueño): anticipación mínima para
   // cancelar/reprogramar desde `/mi-cita`, configurable. Default 24 h.
   const agendaSiteCols = conn

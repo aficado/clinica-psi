@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getSessionProfile } from "@/lib/admin/session";
 import { canManageSchedule } from "@/lib/rbac";
-import { professionals } from "@/lib/data";
+import { getProfessionals } from "@/lib/professionals";
 import { getRules, listAppointments } from "@/lib/schedule";
 import { Icon } from "@/components/ui";
 import { ScheduleManager } from "@/components/admin/ScheduleManager";
@@ -52,7 +52,7 @@ export default async function HorariosPage() {
       <ScheduleManager
         rules={getRules()}
         appointments={listAppointments()}
-        professionals={professionals}
+        professionals={getProfessionals()}
       />
     </div>
   );

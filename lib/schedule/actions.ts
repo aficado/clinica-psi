@@ -20,15 +20,19 @@ import { cookies } from "next/headers";
 import { getSessionProfile } from "@/lib/admin/session";
 import { logAudit } from "@/lib/audit";
 import { canManageSchedule } from "@/lib/rbac";
+import { getProfessionals } from "@/lib/professionals";
+import { getServices, type ServiceView } from "@/lib/content";
+import { isoLocal } from "@/lib/schedule";
 import {
   cancelAppointment,
   createAppointment,
   deleteRule,
-  openSlotsFor,
+  daySlotsFor,
+  monthSchedule,
   rescheduleAppointment,
   saveRule,
   type BookingInput,
-  type DaySlots,
+  type DaySlotsWithReason,
 } from "@/lib/schedule";
 
 const SESSION_COOKIE = "rv_admin_session";
@@ -38,15 +42,39 @@ async function currentProfile() {
   return getSessionProfile(token);
 }
 
-type AvailabilityResult = { ok: true; days: DaySlots[] } | { ok: false; error: string };
+/** Disponibilidad real del profesional en un mes completo (`/agendar` + `/mi-cita`). */
+type AvailabilityResult = { ok: true; days: DaySlotsWithReason[] } | { ok: false; error: string };
 type Result = { ok: true; token?: string } | { ok: false; error: string };
 
 // ------------------------------------------------------------
 // Público (sin sesión): el token de `/mi-cita/<token>` es la llave
 
-/** Consulta de disponibilidad real (ocupación desde `appointments`). */
+/** Mes completo con la disponibilidad de cada día para el profesional seleccionado (`/agendar`, `/mi-cita`). */
 export async function fetchAvailability(serviceSlug: string, proId: string): Promise<AvailabilityResult> {
-  return openSlotsFor(serviceSlug, proId);
+  const svc = getServices().find((s) => s.slug === serviceSlug);
+  if (!svc) return { ok: false, error: "Ese servicio no está disponible ahora mismo." };
+  if (!getProfessionals().some((p) => p.id === proId))
+    return { ok: false, error: "Ese profesional no está disponible ahora mismo." };
+  const today = isoLocal(new Date());
+  return { ok: true, days: monthSchedule(proId, today) };
+}
+
+/** Mes completo para navegar el calendario (la fecha que sea; se puede pedir cualquier día del año).
+ *  NOTA: se compara MES contra MES (`YYYY-MM` vs `YYYY-MM`); comparar `"2026-11"` < `"2026-11-01"`
+ *  era true y dejaba el calendario del mes actual vacío. */
+export async function fetchMonthSchedule(proId: string, dateIso: string): Promise<AvailabilityResult> {
+  const monthIso = dateIso.slice(0, 7);
+  const currentMonth = isoLocal(new Date()).slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(monthIso))
+    return { ok: false, error: "El mes solicitado no es válido." };
+  if (monthIso < currentMonth) return { ok: true, days: [] };
+  return { ok: true, days: monthSchedule(proId, monthIso) };
+}
+
+/** Disponibilidad de un día concreto (navegación del calendario; se puede pedir cualquier día del año). */
+export async function fetchDaySlots(dateIso: string, proId: string): Promise<AvailabilityResult> {
+  if (dateIso < isoLocal(new Date())) return { ok: false, error: "No puedes agendar en el pasado." };
+  return { ok: true, days: [daySlotsFor(dateIso, proId)] };
 }
 
 /** Alta de cita con anti-doble-reserva (5.04/5.05). */

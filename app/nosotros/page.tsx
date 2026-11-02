@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { clinic, professionals } from "@/lib/data";
+import { clinic } from "@/lib/data";
+import { getProfessionals } from "@/lib/professionals";
 import { waLink } from "@/lib/utils";
 import { Button, Card, Chip, Icon, SectionTitle, TodoChip } from "@/components/ui";
 import { Reveal } from "@/components/Reveal";
@@ -81,10 +82,10 @@ export default function NosotrosPage() {
               </div>
               <div>
                 <h3 className="flex flex-wrap items-center gap-2 text-2xl">
-                  {professionals[1]?.name ?? "Profesionales"}
+                  {getProfessionals()[1]?.name ?? "Profesionales"}
                   <TodoChip>TODO: nombre y foto</TodoChip>
                 </h3>
-                <p className="mt-1 text-sage-dark">{professionals[1]?.role ?? "Terapia manual y medicina china"}</p>
+                <p className="mt-1 text-sage-dark">{getProfessionals()[1]?.role ?? "Terapia manual y medicina china"}</p>
                 <p className="mt-3 text-ink-soft">
                   (TODO: biografía, formación y experiencia real del especialista en masajes y medicina china.)
                 </p>
