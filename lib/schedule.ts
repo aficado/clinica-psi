@@ -36,14 +36,16 @@ export interface DaySlots {
   hours: { hour: number; taken: boolean }[];
 }
 
-/** Motivo por el que un día no tiene horarios (fuera de regla / sin cupo / bloqueado R4-B-3). */
-export type DayReason = "no_atiende" | "sin_cupo" | "cerrado" | null;
+/** Motivo por el que un día no tiene horarios (fuera de regla / sin cupo / bloqueado / fuera de ventana). */
+export type DayReason = "no_atiende" | "sin_cupo" | "cerrado" | "fuera_de_ventana" | null;
 
 export interface DaySlotsWithReason extends DaySlots {
   reason: DayReason;
   freeCount: number;
   /** PB-3: etiqueta del bloqueo cuando `reason === "cerrado"` (p. ej. "Vacaciones: puente"). */
   blockedLabel?: string;
+  /** HF-1: último día agendable cuando `reason === "fuera_de_ventana"` (para el aviso legible). */
+  windowEndIso?: string;
 }
 
 export type ApptStatus = "confirmada" | "cancelada" | "completada";
@@ -225,6 +227,19 @@ export function getSiteTimeZone(): string {
   return row?.time_zone || "America/Mexico_City";
 }
 
+/**
+ * HF-1 (R4-B-HOTFIX-1): ventana agendable real = mañana … mañana + N - 1,
+ * con N = `site_settings.booking_window_days`. Es la MISMA que exige
+ * `slotCandidateError` al escribir la cita, así lo que se puede clicar es
+ * exactamente lo que se puede reservar.
+ */
+export function windowBounds(): { min: string; max: string } {
+  const min = addDaysIso(1);
+  const d = new Date(`${min}T12:00:00`);
+  d.setDate(d.getDate() + getBookingWindowDays() - 1);
+  return { min, max: isoLocal(d) };
+}
+
 /** Regla activa del profesional en `dateIso` (incluye el sábado opcional). */
 export function getRule(proId: string, dateIso: string): RuleView | undefined {
   const dow = hourOfIso(dateIso);
@@ -249,8 +264,22 @@ function takenSet(proId: string, first: string, last: string): Set<string> {
   return new Set(takenRows.map((t) => `${t.date}|${t.hour}`));
 }
 
-/** Slots de un día concreto (5.03/5.04): la ventana se abre en el año completo. */
+/** Slots de un día concreto (5.03/5.04): la ventana de reserva sí deshabilita días (HF-1). */
 export function daySlotsFor(dateIso: string, proId: string): DaySlotsWithReason {
+  // HF-1 (R4-B-HOTFIX-1): afuera de la ventana del panel no hay horarios, aunque
+  // el profesional atienda ese día. Se resuelve ANTES que reglas y bloqueos
+  // para que el calendario grisco el día con su propio motivo.
+  const win = windowBounds();
+  if (dateIso < win.min || dateIso > win.max) {
+    return {
+      dateIso,
+      hours: [],
+      reason: "fuera_de_ventana",
+      freeCount: 0,
+      windowEndIso: win.max,
+    };
+  }
+
   // PB-3 (R4-B-3): un día bloqueado por excepción (vacaciones/festivo) no
   // ofrece horarios, tenga o no regla el profesional ese día.
   const ex = exceptionFor(proId, dateIso);
@@ -335,13 +364,10 @@ function slotCandidateError(
     return "La modalidad no aplica a este servicio.";
   if (!professionalsFor(svc, modality as "presencial" | "enlinea").some((p) => p.id === proId))
     return "Ese profesional no atiende este servicio en esa modalidad.";
-  const d0 = new Date(`${addDaysIso(1)}T12:00:00`);
-  const dSel = new Date(`${dateIso}T12:00:00`);
-  const windowDays = getBookingWindowDays();
-  const max = new Date(d0);
-  max.setDate(max.getDate() + windowDays - 1);
-  if (dSel < d0 || dSel > max)
-    return `Solo puedes agendar entre mañana y dentro de ${windowDays} días.`;
+  const win = windowBounds();
+  if (dateIso < win.min) return "Solo puedes agendar a partir de mañana.";
+  if (dateIso > win.max)
+    return `La agenda abre hasta el ${win.max} (${getBookingWindowDays()} días de anticipación).`;
   const rule = getRules().find((r) => r.active && r.proId === proId && r.dow === hourOfIso(dateIso));
   if (!rule) return "Ese día el profesional no atiende. Elige otro.";
   // PB-3 (R4-B-3): el bloqueo por excepción también corta por API (no solo

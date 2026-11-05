@@ -1,8 +1,10 @@
 /** ============================================================
  *  CALENDARIO DE MES COMPLETO — R4-B (5.03, 5.10)
- *  Reemplaza el grid de días de R4-A: ya no hay una ventana de
- *  21 días; cualquier día del año es seleccionable y su estado se
- *  explica con un motivo ("no atiende ese día" / "sin cupos").
+ *  Reemplaza el grid de días de R4-A. Cada día muestra su estado con
+ *  un motivo ("no atiende ese día", "sin cupos", "bloqueado: …" y, desde
+ *  R4-B-HOTFIX-1, "fuera de la ventana de reserva"). La ventana ya no es
+ *  fija: la manda `site_settings.booking_window_days` (Ajustes) y los días
+ *  después del límite salen deshabilitados, no clicables.
  *  Sigue la temática del sitio (sage/terracotta/mist/sand) y pide
  *  el mes completo al servidor con `fetchMonthSchedule`.
  *  El mes SIEMPRE se maneja como `YYYY-MM` (local, no UTC) y se
@@ -168,6 +170,18 @@ export function CalendarView({
         </div>
       )}
 
+      {/* HF-1: la ventana del panel se ve — aviso con el último día agendable. */}
+      {(() => {
+        const out = slots?.find((s) => s.reason === "fuera_de_ventana");
+        if (!out?.windowEndIso) return null;
+        return (
+          <p className="text-sm text-ink-soft" role="note">
+            Puedes agendar hasta el <strong>{formatDateLongMX(out.windowEndIso)}</strong> (ventana de
+            reserva de la clínica). Los días posteriores salen en gris.
+          </p>
+        );
+      })()}
+
       {/* Detalle del día seleccionado: horarios — BOTONES seleccionables (R4-A los tenía en el grid
           de horas; aquí se conservan dentro del calendario para poder cambiar de hora sin salir).
           PB-2 (R4-B-BUG-1): los horarios ya reservados ya NO se muestran (ni tachados ni apagados):
@@ -247,6 +261,8 @@ function formatDateLongMX(iso: string): string {
 /** Título de ayuda para un día (accesibilidad: el motivo se lee con el lector de pantalla). */
 function dayTitle(info: DaySlotsWithReason, past: boolean): string {
   if (past) return "Este día ya pasó.";
+  if (info.reason === "fuera_de_ventana")
+    return `Fuera de la ventana de reserva: la agenda abre hasta el ${info.windowEndIso ?? ""}.`;
   if (info.reason === "cerrado")
     return `El profesional no atiende este día (${info.blockedLabel ?? "día bloqueado"}).`;
   if (info.reason === "no_atiende") return "El profesional no atiende este día.";

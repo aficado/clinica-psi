@@ -20,7 +20,7 @@ En R4-A la cita es real (BD, anti-doble-reserva), pero el calendario público si
 
 | Ítem | Hoy (R4-A) | Después de R4-B |
 |---|---|---|
-| **5.03** — ventana de disponibilidad | Solo los próximos 21 días (`BOOKING_WINDOW_DAYS`), calculada en `schedule.ts` | **Grid de mes entero**; el año completo seleccionable; día no disponible marcado (no borra al paciente) |
+| **5.03** — ventana de disponibilidad | Solo los próximos 21 días (`BOOKING_WINDOW_DAYS`), calculada en `schedule.ts` | **Grid de mes entero**; el año completo navegable y día no disponible marcado (no borra al paciente); **R4-B-HOTFIX-1:** respetando `booking_window_days`, los días posteriores al límite salen deshabilitados |
 | **5.04** — anti-doble-reserva | Transacción + índice parcial | Igual (heredado, ya probado) |
 | **5.01** — servicios del servicio | Fijos en `lib/data.ts` | **Configurables desde el panel** (slug, nombre, duración, buffer, modalidades) |
 | **5.02** — reglas por día/profesional | Reglas sembradas (`availability_rules`) + edición simple | **CRUD completo de profesionales + horarios por día/hora**; bloqueo/liberación **de un día exacto** por clic en el calendario anual, con deshacer (R4-B-UX-1) |
@@ -53,7 +53,7 @@ El estado del flujo (`serviceSlug, mode, proId, dateIso, hour`) se guarda en **c
 ### 3.3 Experiencia de paso a paso (sin cambios visuales, cambio de motor)
 
 Mismo flujo visual de R4-A (servicio → modalidad → profesional → cuándo → datos), pero:
-- El paso "Cuándo" no fuerza `BOOKING_WINDOW_DAYS` — el paciente puede cambiar de mes para ver el año completo.
+- El paso "Cuándo" navega el año completo **pero** desde R4-B-HOTFIX-1 los días fuera de la ventana (`site_settings.booking_window_days`, editable en Ajustes) salen deshabilitados con su motivo: lo clicable = lo reservable.
 - Si la fecha está fuera de regla del profesional, el mensaje de error dice **por qué** (no atiende ese día / no tiene horarios).
 
 ## 4. Administración (`/admin/servicios`, `/admin/profesionales`)
@@ -111,6 +111,7 @@ export function monthSchedule(proId: string, dateIso: string): MonthView { ... }
 | **R4-B-BUG-1** — Sprint intermedio de corrección del flujo `/agendar` (Volver + horarios tachados + citas de prueba) | PB-2b: `Volver` visible en ¿Cuándo? sin fecha elegida. PB-1: `Volver` arriba de cada paso. PB-2: horarios reservados desaparecen. PB-3: citas de prueba visibles en `/admin/horarios`. | 🔶 **EJECUTADO (2026-11-02):** verificado con Puppeteer (volver arriba, persona simula agendado) + dueño confirmó las 2 citas de prueba en `/admin/horarios` (`rv-ce8…`, `rv-fba…`). Commit `defd286` → push `r4-b`. |
 | **R4-B-3** — Calendario admin + Ajustes | `/admin/horarios` ampliado con vista anual, página Ajustes (`cancel_cutoff_hours`, `booking_window_days`, zona horaria), excepciones por fecha (vacaciones/festivos) | ✅ **EJECUTADO (2026-11-05):** pestaña **Calendario anual** (12 mini-meses, carga por día, nav por año/profesional con `yearSchedule` = 2 consultas/año; D-R4-B-7 resuelta: mes a mes); **`/admin/ajustes`** (cutoff + ventana + zona, solo admin, D-R4-B-5 resuelta: ventana editable; D-R4-4: zona configurable); **bloqueos por fecha** (5.02): tabla `date_exceptions`, alta/desactivar/eliminar desde la pestaña, motivo `cerrado` en el calendario público + rechazo duro al reservar. `flow-verify-r4b3.mjs` → TODAS pasaron; `check:agenda` PASS; detalle `docs/PLAN-R4-B-3.md` |
 | **R4-B-UX-1** — Bloqueo de días por clic (+ deshacer) | Casillas del calendario anual clicables: panel en el sitio para bloquear/liberar **ese día exacto**, motivo y alcance; partir rangos; banner con **Deshacer** (pila de la sesión) y enlace "Ver cómo lo ve el paciente" (`/agendar?...&dia=`); formulario de rango plegado | ✅ **EJECUTADO (2026-11-05):** motor nuevo `blockDay`/`freeDay`/`undoDayOp`/`exceptionsCovering` (+acciones RBAC/auditoría), UI en `ScheduleManager`, `?dia=` en `/agendar`. `flow-verify-ux1.mjs` → TODAS pasaron; `check:agenda` PASS. Detalle y guion de feedback: `docs/PLAN-R4-B-UX-1.md`. **Pendiente: feedback del admin (F-1…F-4)** |
+| **R4-B-HOTFIX-1** — Ventana visible + botones del flujo | `booking_window_days` grisó los días fuera de rango en `/agendar` y `/mi-cita` (motivo `fuera_de_ventana` + aviso del límite); "Volver" → **Regresar** arriba y sólido; **Siguiente/Confirmar** abajo a la derecha, difuminados y desactivados hasta cumplir los requisitos del paso | ✅ **EJECUTADO (2026-11-05):** detalle y evidencia en `docs/PLAN-R4-B-HOTFIX-1.md`. Ajusta PB-1 de R4-B-BUG-1 (subir la fila de acciones) por orden del dueño: ahora sube solo el retroceso. Suites `flow-verify-hotfix1.mjs` y `flow-verify-final.mjs` en verde; `check:agenda` PASS |
 | **R4-B-4** — QA y gate | `npm run check:agenda` + nueva prueba (año completo); smoke del calendario en 3 dispositivos; docs actualizados | ⬜ |
 
 ## 8. Gate de salida de R4-B (propuesto, lo aprueba el dueño)

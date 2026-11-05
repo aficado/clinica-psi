@@ -149,6 +149,12 @@ try {
   // 3b) crear el bloqueo para la Dra en ESE día
   await admin.page.goto(`${base}/admin/horarios?tab=calendario`, { waitUntil: "networkidle0" });
   await sleep(1300);
+  // R4-B-UX-1 movió el formulario de rango dentro de un <details>: hay que abrirlo.
+  await admin.js(() => {
+    const det = [...document.querySelectorAll("details summary")].find((x) => /rango/i.test(x.textContent));
+    if (det) det.click();
+  });
+  await sleep(600);
   const pre = await admin.js((iso) => {
     const sets = [...document.querySelectorAll("select")];
     const exSel = sets.find((s) => [...s.options].some((o) => o.value === "*"));
@@ -169,7 +175,7 @@ try {
     return JSON.stringify({ ok: true, pro: exSel.value });
   }, dayIso);
   line(`3b) prefill bloqueo: ${pre}`);
-  await admin.clickBtn("Bloquear esos d");
+  await admin.clickBtn("Bloquear el rango");
   await sleep(2500);
   const blockMsg = await admin.js(() => document.querySelector('[role="status"]')?.textContent ?? "");
   line(`3c) creación: "${blockMsg}"`);
@@ -199,7 +205,7 @@ try {
   if (!blocked.found || !blocked.disabled || !/Vacaciones|PRUEBA/i.test(blocked.title)) fails++;
   await v2.ctx.close();
 
-  // --- 4. ventana dinámica (15 d): reservar 2 meses adelante debe fallar -----
+  // --- 4. ventana (15 d): R4-B-HOTFIX-1 — los días fuera de ventana se grisan ---
   const v3 = await openAgendar();
   for (let i = 0; i < 2; i++) {
     await v3.js(() => {
@@ -208,61 +214,22 @@ try {
     });
     await sleep(1300);
   }
-  const far = JSON.parse(
+  const win = JSON.parse(
     await v3.js(() => {
-      const bs = [...document.querySelectorAll('[role="grid"] button')].filter(
-        (b) => !b.disabled && b.getAttribute("aria-disabled") !== "true",
-      );
-      if (!bs.length) return JSON.stringify(false);
-      bs[0].click();
-      return JSON.stringify(true);
+      const bs = [...document.querySelectorAll('[role="grid"] button')];
+      const enabled = bs.filter((b) => !b.disabled && b.getAttribute("aria-disabled") !== "true");
+      const note = [...document.querySelectorAll('[role="note"]')].map((n) => n.textContent.replace(/\s+/g, " ").trim()).join(" | ");
+      const vent = bs.find((b) => /ventana/i.test(b.getAttribute("title") || ""));
+      return JSON.stringify({
+        dias: bs.length,
+        habilitados: enabled.length,
+        note,
+        titulo: vent ? vent.getAttribute("title") : null,
+      });
     }),
   );
-  await sleep(1200);
-  const hourOk = JSON.parse(
-    await v3.js(() => {
-      const hs = [...document.querySelectorAll('[role="group"] button')].filter(
-        (b) => !b.disabled && b.getAttribute("aria-disabled") !== "true",
-      );
-      if (!hs.length) return JSON.stringify(false);
-      hs[0].click();
-      return JSON.stringify(true);
-    }),
-  );
-  line(`4a) día+hora lejanos elegidos: día=${far} hora=${hourOk}`);
-  if (!far || !hourOk) fails++;
-  await sleep(600);
-  await v3.clickBtn("Continuar");
-  await sleep(900);
-  const filled = JSON.parse(
-    await v3.js(() => {
-      const n = document.querySelector("#bk-nombre");
-      const e = document.querySelector("#bk-correo");
-      if (!n || !e) return JSON.stringify({ form: false });
-      const setNative = (el, val) => {
-        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, String(val));
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-      };
-      setNative(n, "Prueba ventana R4B-3");
-      setNative(e, "ventana@demo.mx");
-      const cb = document.querySelector('input[type="checkbox"]');
-      if (cb && !cb.checked) cb.click();
-      return JSON.stringify({ form: true });
-    }),
-  );
-  if (!filled.form) { line("4b) ✘ no llegó al formulario Tus datos"); fails++; }
-  await v3.clickBtn("Confirmar cita");
-  await sleep(6000);
-  const farResult = JSON.parse(
-    await v3.js(() => {
-      const alert = document.querySelector('[role="alert"]');
-      if (alert) return JSON.stringify({ kind: "alert", text: alert.textContent.trim().slice(0, 140) });
-      const done = document.querySelector('[role="status"]');
-      return JSON.stringify({ kind: done ? "status" : "none", text: done?.textContent?.trim().slice(0, 140) ?? "" });
-    }),
-  );
-  line(`4) reserva fuera de ventana (15 d): ${farResult.kind} → "${farResult.text}"`);
-  if (!(farResult.kind === "alert" && /15 días/.test(farResult.text))) fails++;
+  line(`4) mes fuera de ventana (15 d): ${JSON.stringify(win)}`);
+  if (win.habilitados !== 0 || !/hasta el/.test(win.note) || !/ventana/i.test(String(win.titulo))) fails++;
   await v3.ctx.close();
 
   // --- 5. limpieza: borrar el bloqueo y restaurar ajustes --------------------

@@ -21,6 +21,8 @@ function localIso(d: Date): string {
 const COOKIE_STEP = 4;
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** HF-3: las mismas 4 reglas que valida el servidor (`createAppointment`), para el botón. */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 interface BookingInitial {
   service?: string;
@@ -31,6 +33,22 @@ interface BookingInitial {
 }
 
 const STEPS = ["Servicio", "Modalidad", "Profesional", "Horario", "Tus datos"];
+
+/**
+ * HF-2 (R4-B-HOTFIX-1): el retroceso se llama **Regresar**, vive SIEMPRE en la
+ * primera línea del paso y es sólido (sage) con flecha, para que se vea nítido
+ * y distinto del botón de avance (que va abajo a la derecha).
+ */
+function BackButton({ to, back }: { to: () => void; back: string }) {
+  return (
+    <div className="mb-5">
+      <Button variant="secondary" onClick={to} ariaLabel={`Regresar a ${back}`}>
+        <Icon name="arrow" className="h-4 w-4 rotate-180" />
+        Regresar
+      </Button>
+    </div>
+  );
+}
 
 const modLabel = (m: string) =>
   m === "enlinea" ? "En línea" : m === "presencial" ? "Presencial" : m;
@@ -111,6 +129,23 @@ export function BookingFlow({
   const service = serviceSlug ? services.find((s) => s.slug === serviceSlug) ?? null : null;
   const pro = proId ? professionals.find((p) => p.id === proId) ?? null : null;
   const pros = service && modality ? professionalsFor(service, modality, professionals) : [];
+
+  // HF-3 (R4-B-HOTFIX-1): "Siguiente/Confirmar" vive ABAJO a la derecha y se ve
+  // difuminado hasta que el paso tenga lo necesario (mismas reglas del servidor).
+  const slotPicked = dateIso !== null && hour !== null;
+  const emailOk = EMAIL_RE.test(email.trim());
+  const nameOk = name.trim().length >= 3;
+  const phoneOk = phone.trim() === "" || phone.replace(/[^0-9]/g, "").length >= 10;
+  const dataReady = nameOk && emailOk && phoneOk && consent;
+  const missingHint = !nameOk
+    ? "Escribe tu nombre completo."
+    : !emailOk
+      ? "Escribe un correo válido."
+      : !phoneOk
+        ? "El teléfono necesita 10 dígitos (o déjalo vacío)."
+        : !consent
+          ? "Marca la casilla del aviso de privacidad."
+          : "";
 
   function clearDownstream(resetFrom: "service" | "mode" | "pro") {
     if (resetFrom !== "pro") setProId(null);
@@ -414,12 +449,8 @@ export function BookingFlow({
 
         {step === 1 && service ? (
           <section aria-labelledby="bk-paso2">
-            {/* PB-1 (R4-B-BUG-1): "Volver" arriba de todo el paso, no al pie. */}
-            <div className="mb-5 flex flex-wrap gap-3">
-              <Button variant="ghost" onClick={() => setStep(0)}>
-                Volver
-              </Button>
-            </div>
+            {/* HF-2: Regresar arriba (PB-1 de R4-B-BUG-1 se ajusta: solo el retroceso sube). */}
+            <BackButton to={() => setStep(0)} back="Servicio" />
             <h2 id="bk-paso2" className="text-xl">
               ¿Presencial o en línea?
             </h2>
@@ -447,12 +478,8 @@ export function BookingFlow({
         ) : null}
         {step === 2 && service && modality ? (
           <section aria-labelledby="bk-paso3">
-            {/* PB-1 (R4-B-BUG-1): "Volver" arriba de todo el paso, no al pie. */}
-            <div className="mb-5 flex flex-wrap gap-3">
-              <Button variant="ghost" onClick={() => setStep(1)}>
-                Volver
-              </Button>
-            </div>
+            {/* HF-2 */}
+            <BackButton to={() => setStep(1)} back="Modalidad" />
             <h2 id="bk-paso3" className="text-xl">
               ¿Con quién?
             </h2>
@@ -499,31 +526,14 @@ export function BookingFlow({
 
         {step === 3 && service && pro ? (
           <section aria-labelledby="bk-paso4">
-            {/* PB-1 (R4-B-BUG-1): la fila de acciones va ARRIBA del paso. */}
-            <div className="mb-5 flex flex-wrap gap-3">
-              <Button variant="ghost" onClick={() => setStep(2)}>
-                Volver
-              </Button>
-              {dateIso && hour !== null ? (
-                <Button
-                  variant="primary"
-                  onClick={() => {
-                    setError(null);
-                    // Paso 4 real = "Tus datos" (0=Servicio … 3=Horario, 4=Datos).
-                    setStep(4);
-                    writeState({ step: 4 });
-                  }}
-                >
-                  Continuar
-                </Button>
-              ) : null}
-            </div>
+            {/* HF-2: solo el retroceso va arriba; el avance bajó al pie del paso. */}
+            <BackButton to={() => setStep(2)} back="Profesional" />
             <h2 id="bk-paso4" className="text-xl">
               ¿Cuándo?
             </h2>
             <p className="mt-1 text-sm text-ink-soft">
-              Elige un día de la agenda de {pro.name}: los días fuera de su horario se ven pero no
-              se pueden seleccionar.
+              Elige un día de la agenda de {pro.name}: los días fuera de su horario o de la ventana
+              de reserva de la clínica se ven en gris y no se pueden seleccionar.
             </p>
             <Card className="mt-4 p-6">
               <CalendarView
@@ -534,16 +544,37 @@ export function BookingFlow({
                 onNavigate={(m) => setMonthIso(m)}
               />
             </Card>
+
+            {/* HF-3: "Siguiente" siempre abajo a la derecha; difuminado y desactivado
+                hasta que haya DÍA y HORA elegidos (lo que exige el servidor). */}
+            <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
+              {!slotPicked ? (
+                <span className="text-sm text-ink-soft" role="note">
+                  {dateIso ? "Elige también la hora." : "Elige día y hora para continuar."}
+                </span>
+              ) : null}
+              <Button
+                variant="primary"
+                disabled={!slotPicked}
+                ariaLabel={slotPicked ? "Siguiente a Tus datos" : "Siguiente (elige día y hora)"}
+                onClick={() => {
+                  if (!slotPicked) return;
+                  setError(null);
+                  // Paso 4 real = "Tus datos" (0=Servicio … 3=Horario, 4=Datos).
+                  setStep(4);
+                  writeState({ step: 4 });
+                }}
+              >
+                Siguiente
+                <Icon name="arrow" className="h-4 w-4" />
+              </Button>
+            </div>
           </section>
         ) : null}
         {step === 4 && service && pro && modality && dateIso && hour !== null ? (
           <form onSubmit={submit} noValidate>
-            {/* PB-1 (R4-B-BUG-1): el botón Volver sube al inicio del paso. */}
-            <div className="mb-5 flex flex-wrap gap-3">
-              <Button variant="ghost" type="button" onClick={() => setStep(3)}>
-                Volver
-              </Button>
-            </div>
+            {/* HF-2 */}
+            <BackButton to={() => setStep(3)} back="Horario" />
             <h2 id="bk-paso5" className="text-xl">
               Tus datos
             </h2>
@@ -627,9 +658,23 @@ export function BookingFlow({
               </label>
             </div>
 
-            <Button type="submit" variant="primary" disabled={submitting}>
-              {submitting ? "Registrando…" : "Confirmar cita"}
-            </Button>
+            {/* HF-3: confirmación abajo a la derecha, difuminada hasta que los
+                campos obligatorios cumplan las mismas reglas del servidor. */}
+            <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
+              {!dataReady && !submitting ? (
+                <span className="text-sm text-ink-soft" role="note">
+                  {missingHint}
+                </span>
+              ) : null}
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={submitting || !dataReady}
+                ariaLabel={dataReady ? "Confirmar cita" : `Confirmar cita (falta: ${missingHint})`}
+              >
+                {submitting ? "Registrando…" : "Confirmar cita"}
+              </Button>
+            </div>
           </form>
         ) : null}
 

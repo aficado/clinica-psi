@@ -1,4 +1,5 @@
-// Verificación final completa del flujo de citas (R4-B-BUG-1).
+// Verificación final del flujo de citas (R4-B-BUG-1 + R4-B-HOTFIX-1:
+// Regresar arriba, avance abajo-derecha difuminado, ventana que grisará días).
 // TODO: limpiar los scripts después de la verificación.
 import puppeteer from "puppeteer";
 import { DatabaseSync } from "node:sqlite";
@@ -38,7 +39,7 @@ try {
         servicio: all.filter((b) => b.textContent.includes("Terapia de pareja")).length,
         presencial: all.filter((b) => b.textContent.includes("Presencial")).length,
         profesional: all.filter((b) => b.textContent.includes("Dra.")).length,
-        continuar: all.filter((b) => b.textContent.includes("Continuar")).length,
+        siguiente: all.filter((b) => /Siguiente|Continuar/.test(b.textContent)).length,
         confirmar: all.filter((b) => b.textContent.includes("Confirmar cita")).length,
       });
     }),
@@ -53,15 +54,30 @@ try {
     }, text),
   );
 
-  const verificarVolver = async (p, secId) => JSON.parse(
-    await p.evaluate((sid) => {
-      const section = document.querySelector(`section[aria-labelledby='${sid}']`);
-      if (!section) return JSON.stringify({ btns: 0, inTopRow: false });
-      const btns = [...section.querySelectorAll("button")].filter((b) => b.textContent.trim().toLowerCase() === "volver");
-      const rows = [...section.querySelectorAll("div")].filter((d) => d.className.includes("flex-wrap"));
-      const inTopRow = rows.length > 0 && btns.some((b) => rows[0].contains(b));
-      return JSON.stringify({ btns: btns.length, inTopRow });
-    }, secId),
+  /**
+   * R4-B-HOTFIX-1: "Regresar" SIEMPRE arriba del contenido del paso y el avance
+   * ("Siguiente"/"Confirmar cita") ABAJO y a la DERECHA, difuminado (disabled)
+   * hasta cumplir los requisitos. Se comprueba por geometría, no por clases.
+   */
+  const verificarBotones = async (p, sel) => JSON.parse(
+    await p.evaluate((css) => {
+      const root = document.querySelector(css) || document.querySelector("section") || document.querySelector("form");
+      if (!root) return JSON.stringify({ ok: false, why: "sin raíz" });
+      const h2 = root.querySelector("h2");
+      const hy = h2 ? h2.getBoundingClientRect().top : Number.NaN;
+      const back = [...root.querySelectorAll("button")].filter((b) => /regresar/i.test(b.textContent));
+      const next = [...root.querySelectorAll("button")].filter((b) => /Siguiente|Confirmar cita/.test(b.textContent));
+      const vw = window.innerWidth;
+      return JSON.stringify({
+        ok: true,
+        back: back.length,
+        backAbove: back.length > 0 && back.every((b) => b.getBoundingClientRect().top < hy),
+        next: next.length,
+        nextBelow: next.length > 0 && next.every((b) => b.getBoundingClientRect().top > hy),
+        nextRight: next.length > 0 && next.every((b) => b.getBoundingClientRect().right > vw * 0.55),
+        nextDisabled: next.length > 0 && next.every((b) => b.disabled),
+      });
+    }, sel),
   );
 
   // ---- Paso A: limpiar citas de prueba previas ---------------------------
@@ -98,13 +114,13 @@ try {
   const c3 = await clickText(p1, "Dra.");
   await sleep(800);
   const s3 = await pageState(p1);
-  line(`B) paso ¿Cuándo?: sección=${s3.secId}, continuar=${s3.continuar}`);
+  line(`B) paso ¿Cuándo?: sección=${s3.secId}, siguiente=${s3.siguiente}`);
   if (c3 && s3.secId !== "bk-paso4") fails++;
 
-  // verificar Volver arriba en paso ¿Cuándo?
-  const volver4 = await verificarVolver(p1, "bk-paso4");
-  line(`B) ¿Cuándo? → Volver=${volver4.btns}, primera línea: ${volver4.inTopRow ? "✔ sí" : "✘ NO"}`);
-  if (volver4.btns < 1 || !volver4.inTopRow) fails++;
+  // HF-2/HF-3: Regresar arriba y Siguiente abajo-derecha (deshabilitado hasta elegir día+hora)
+  const bot4 = await verificarBotones(p1, "section[aria-labelledby='bk-paso4']");
+  line(`B) ¿Cuándo? → ${JSON.stringify(bot4)}`);
+  if (!bot4.ok || bot4.back < 1 || !bot4.backAbove || !bot4.nextBelow || !bot4.nextRight) fails++;
 
   // elegir día + hora en el calendario
   const eligio = JSON.parse(
@@ -127,27 +143,18 @@ try {
   line(`B) ✅ día+hora elegidos: ${eligio ? "sí" : "no"}`);
   if (!eligio) fails++;
 
-  // Continuar -> paso Tus datos
-  const c4 = await clickText(p1, "Continuar");
+  // Siguiente -> paso Tus datos (antes "Continuar"; HF-3)
+  const c4 = await clickText(p1, "Siguiente");
   await sleep(800);
   const s4 = await pageState(p1);
   const paso4Ok = s4.secId === "bk-paso5" || !s4.secId; // el paso Tus datos es <form>, no tiene aria-labelledby
   line(`B) paso Tus datos: sección=${s4.secId}, confirmar=${s4.confirmar} (avanzo: ${c4 ? "sí" : "no"})`);
   if (!paso4Ok || !c4) fails++;
 
-  // verificar Volver arriba en paso Tus datos
-  const volver5 = JSON.parse(
-    await p1.evaluate(() => {
-      const f = document.querySelector("form");
-      if (!f) return JSON.stringify({ btns: 0, inTopRow: false });
-      const btns = [...f.querySelectorAll("button")].filter((b) => b.textContent.trim().toLowerCase() === "volver");
-      const rows = [...f.querySelectorAll("div")].filter((d) => d.className.includes("flex-wrap"));
-      const inTopRow = rows.length > 0 && btns.some((b) => rows[0].contains(b));
-      return JSON.stringify({ btns: btns.length, inTopRow });
-    }),
-  );
-  line(`B) Tus datos → Volver=${volver5.btns}, primera línea: ${volver5.inTopRow ? "✔ sí" : "✘ NO"}`);
-  if (volver5.btns < 1 || !volver5.inTopRow) fails++;
+  // HF-2/HF-3 en "Tus datos" (el paso es un <form>)
+  const bot5 = await verificarBotones(p1, "form");
+  line(`B) Tus datos → ${JSON.stringify(bot5)}`);
+  if (!bot5.ok || bot5.back < 1 || !bot5.backAbove || !bot5.nextBelow || !bot5.nextRight) fails++;
 
   // llenar formulario y confirmar. Se usa page.type() para que se disparen
   // los eventos input/change (la validación HTML5 requiere que el campo cambie).
@@ -180,6 +187,14 @@ try {
   });
   line(`B) ✅ confirmación: ${result}`);
   if (result !== "OK") fails++;
+  // Token de la cita creada por ESTA corrida (el panel lista solo las futuras con token).
+  const tokenCreado =
+    result === "OK"
+      ? ((await p1.evaluate(() => document.querySelector('[role="status"]')?.textContent ?? "")).match(
+          /rv-[a-f0-9]{16}/,
+        )?.[0] ?? null)
+      : null;
+  line(`B) token de esta corrida: ${tokenCreado}`);
 
   // ---- Paso C: verificar en BD -------------------------------------------
   const rows = db.prepare("SELECT * FROM appointments WHERE status='confirmada'").all();
@@ -223,13 +238,13 @@ try {
     else {
       await sleep(1500);
       const citasAdmin = JSON.parse(
-        await p2.evaluate(() => {
-          const li = [...document.querySelectorAll("li")].filter((b) => /rv-[a-f0-9]{8,}/.test(b.textContent));
-          return JSON.stringify({ count: li.length, html: document.body.innerHTML.length });
-        }),
+        await p2.evaluate((tk) => {
+          const li = [...document.querySelectorAll("li")].filter((b) => /rv-[a-f0-9]{16}/.test(b.textContent));
+          return JSON.stringify({ count: li.length, veMiToken: li.some((l) => l.textContent.includes(tk || "∅")) });
+        }, tokenCreado),
       );
-      line(`D) Citas visibles en /admin/horarios: ${citasAdmin.count}`);
-      if (citasAdmin.count < myRows.length) fails++;
+      line(`D) Citas visibles en /admin/horarios: ${citasAdmin.count} · la de esta corrida aparece: ${citasAdmin.veMiToken}`);
+      if (citasAdmin.count < 1 || !citasAdmin.veMiToken) fails++;
     }
   }
 
