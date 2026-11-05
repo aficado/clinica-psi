@@ -25,7 +25,7 @@ En R4-A la cita es real (BD, anti-doble-reserva), pero el calendario público si
 | **5.01** — servicios del servicio | Fijos en `lib/data.ts` | **Configurables desde el panel** (slug, nombre, duración, buffer, modalidades) |
 | **5.02** — reglas por día/profesional | Reglas sembradas (`availability_rules`) + edición simple | **CRUD completo de profesionales + horarios por día/hora** |
 | **5.05** — flujo 4 pasos sobre BD | Flujo funciona, estado en `useState` (se pierde al recargar) | **Misma experiencia + cookies** (`booking_state`); sobrevive reload y navegación a `/privacidad`, `/nosotros`, etc. |
-| **5.10** — panel admin | `/admin/horarios` (citas + horarios por día/prof) | **3 nuevos módulos**: `/admin/servicios`, `/admin/profesionales`, `/admin/calendario` (vista anual para el admin) |
+| **5.10** — panel admin | `/admin/horarios` (citas + horarios por día/prof) | **Ajustado (R4-B-3):** en vez de un módulo `/admin/calendario` separado, la vista anual vive como pestaña "Calendario anual" dentro de `/admin/horarios` (misma audiencia `canManageSchedule`); además `/admin/ajustes` (política) |
 | **5.06/5.08** — correos | Encolados (stub) | Pendiente de R4-D (Resend) |
 
 ## 3. UI del calendario (D-R4-B-1 + D-R4-B-3)
@@ -98,9 +98,9 @@ export function monthSchedule(proId: string, dateIso: string): MonthView { ... }
 
 | ID | Pregunta | Impacto |
 |---|---|---|
-| **D-R4-B-5** | ¿La ventana de reserva es un año fijo o editable desde el panel? | `BOOKING_WINDOW_DAYS` fijo vs `site_settings.booking_window_days` |
-| **D-R4-B-6** | ¿Las citas "fuera de regla" se pueden pedir por WhatsApp y el admin las abre manualmente? | Añade flujo `request` → `adminApprove()` |
-| **D-R4-B-7** | ¿El panel debe mostrar la ocupación anual (mes a mes) o solo la lista de horarios? | El calendario del admin en 3.3 |
+| **D-R4-B-5** | ~~¿La ventana de reserva es un año fijo o editable desde el panel?~~ **RESUELTA (R4-B-3, provisional):** editable en `/admin/ajustes` (`site_settings.booking_window_days`, default 365, clamp 1–730). El dueño puede cambiar de opinión en el gate. | `BOOKING_WINDOW_DAYS` = default de la columna |
+| **D-R4-B-6** | ¿Las citas "fuera de regla" se pueden pedir por WhatsApp y el admin las abre manualmente? (SIGUE PENDIENTE — no entró en R4-B-3) | Añade flujo `request` → `adminApprove()` |
+| **D-R4-B-7** | ~~¿El panel debe mostrar la ocupación anual (mes a mes) o solo la lista de horarios?~~ **RESUELTA (R4-B-3):** vista anual mes a mes en la pestaña "Calendario anual" de `/admin/horarios` | El calendario del admin en 3.3 |
 
 ## 7. Sprints de R4-B
 
@@ -109,7 +109,7 @@ export function monthSchedule(proId: string, dateIso: string): MonthView { ... }
 | **R4-B-1** — Motor + disponibilidad | `getRule`, `daySlotsFor`, `monthSchedule`; grid mes completo; día fuera de regla con motivo; cookies del estado (`booking_state`) | 🔶 **EJECUTADO + ronda de corrección (2026-11-01):** 10 defectos del refactor corregidos (pantalla en blanco al elegir modalidad, calendario vacío en el mes actual, horas no seleccionables, restauración de cookies sin validar…). Detalle: `docs/PLAN-R4-B-1.md` §Corrección de bugs; verificación `tsc`+build limpios, `check:agenda` PASS |
 | **R4-B-2** — Panel servicios + profesionales | `/admin/servicios` (CRUD), `/admin/profesionales` (CRUD + activo/inactivo), seed → BD (inmutable) | 🔶 **EJECUTADO (2026-11-02):** D-R4-B-2 ajustada — NO se duplica `services` (la tabla de R3-C ya era la única fuente y su editor ya elegía modalidades); sí se crea `professionals` + `getProfessionals()` (todos los consumidores cambian de `lib/data` a BD); `/admin/profesionales` alta/edición/activar/inactivo/baja + alinea reglas; `/admin/servicios` vista dedicada con deep-links al editor. Verificado: RBAC 307/200, semilla, UPSERT, `check:agenda` PASS, build 33 rutas |
 | **R4-B-BUG-1** — Sprint intermedio de corrección del flujo `/agendar` (Volver + horarios tachados + citas de prueba) | PB-2b: `Volver` visible en ¿Cuándo? sin fecha elegida. PB-1: `Volver` arriba de cada paso. PB-2: horarios reservados desaparecen. PB-3: citas de prueba visibles en `/admin/horarios`. | 🔶 **EJECUTADO (2026-11-02):** verificado con Puppeteer (volver arriba, persona simula agendado) + dueño confirmó las 2 citas de prueba en `/admin/horarios` (`rv-ce8…`, `rv-fba…`). Commit `defd286` → push `r4-b`. |
-| **R4-B-3** — Calendario admin + Ajustes | `/admin/horarios` ampliado con vista anual, página Ajustes (`cancel_cutoff_hours`, `booking_window_days`, zona horaria), excepciones por fecha (vacaciones/festivos) | ⬜ |
+| **R4-B-3** — Calendario admin + Ajustes | `/admin/horarios` ampliado con vista anual, página Ajustes (`cancel_cutoff_hours`, `booking_window_days`, zona horaria), excepciones por fecha (vacaciones/festivos) | ✅ **EJECUTADO (2026-11-05):** pestaña **Calendario anual** (12 mini-meses, carga por día, nav por año/profesional con `yearSchedule` = 2 consultas/año; D-R4-B-7 resuelta: mes a mes); **`/admin/ajustes`** (cutoff + ventana + zona, solo admin, D-R4-B-5 resuelta: ventana editable; D-R4-4: zona configurable); **bloqueos por fecha** (5.02): tabla `date_exceptions`, alta/desactivar/eliminar desde la pestaña, motivo `cerrado` en el calendario público + rechazo duro al reservar. `flow-verify-r4b3.mjs` → TODAS pasaron; `check:agenda` PASS; detalle `docs/PLAN-R4-B-3.md` |
 | **R4-B-4** — QA y gate | `npm run check:agenda` + nueva prueba (año completo); smoke del calendario en 3 dispositivos; docs actualizados | ⬜ |
 
 ## 8. Gate de salida de R4-B (propuesto, lo aprueba el dueño)

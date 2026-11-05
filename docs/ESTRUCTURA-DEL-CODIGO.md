@@ -14,7 +14,7 @@
 | UI | **React 19.1** | Componentes propios (`components/ui.tsx`); sin librerías de componentes |
 | Estilos | **Tailwind CSS 4.1** | Tokens en `@theme` de `globals.css`, sobreescritos en runtime por `theme_tokens` (BD) y por la paleta oscura (8.14) |
 | Fuentes | `next/font`: Fraunces + Inter | `display: swap`, variables CSS |
-| **BD local** | **`node:sqlite`** (Node ≥ 22) | `data/clinica-bienestar.db`, 16 tablas (12 + agenda R4-A + professionals R4-B-2), seed idempotente desde `lib/data.ts`; Supabase/RLS aplazados al despliegue (D-R4-1, `docs/BACKLOG-R4.md`) |
+| **BD local** | **`node:sqlite`** (Node ≥ 22) | `data/clinica-bienestar.db`, 17 tablas (12 + agenda R4-A + professionals R4-B-2 + date_exceptions R4-B-3), seed idempotente desde `lib/data.ts`; Supabase/RLS aplazados al despliegue (D-R4-1, `docs/BACKLOG-R4.md`) |
 | Sesión | HMAC-SHA256 stateless (`node:crypto`) | Cookie `rv_admin_session` (12 h); perfiles demo en `lib/admin/store.ts` (usuarios reales: Fase 4) |
 | QR | `qrcode` 1.5 | PNG/SVG en `QrWidget` (público y admin) |
 | Imagen OG | `sharp` (herramienta) | `scripts/make-og.mjs` → `public/images/og.png` |
@@ -99,16 +99,17 @@
 | `LinksManager.tsx` | Botones de `/links` (↑↓/destacado/visible) + enlaces cortos con QR desplegable; "Deshacer" |
 | `MenuManager.tsx` | CRUD de `nav_items` + redes (`site_settings`) + **sección «Mapa»** (tipo + consulta/URL, acción `saveMap`) |
 | `TestimonialsManager.tsx` | Cola de aprobación; aprobar exige consentimiento; "Deshacer" |
-| `ScheduleManager.tsx` | **R4-A**: pestañas Citas (upcoming por día, cancelación admin con arm, historial) y Horarios (edición open/close/activo por regla, quitar/añadir día); acciones RBAC en servidor |
+| `ScheduleManager.tsx` | **R4-A**: pestañas Citas (upcoming por día, cancelación admin con arm, historial) y Horarios (edición open/close/activo por regla, quitar/añadir día); **R4-B-3**: pestaña "Calendario anual" (12 mini-meses por profesional con carga por día, `?year=&pro=` server) + gestor de bloqueos por fecha (alta/activar/eliminar); acciones RBAC en servidor |
+| `BookingSettings.tsx` | **R4-B-3 (PB-1)**: formulario de política de agenda (cutoff, ventana de reserva, zona horaria) — consume `saveBooking` (canAdmin) y muestra la hora local en la zona elegida |
 
 ### 2.3 `lib/` — lógica (20)
 
 | Archivo | Qué hace |
 |---|---|
-| `db.ts` | Conexión y esquema (`node:sqlite`; `LOCAL_DB_PATH` sobreescribe): 16 tablas + migraciones `ALTER` comprobadas (`media_assets.deleted_at`; `site_settings.map_type/map_query/map_url`; `site_settings.cancel_cutoff_hours`) + índices únicos parciales de agenda; `references` entre comillas |
+| `db.ts` | Conexión y esquema (`node:sqlite`; `LOCAL_DB_PATH` sobreescribe): 17 tablas + migraciones `ALTER` comprobadas (`media_assets.deleted_at`; `site_settings.map_type/map_query/map_url`; `site_settings.cancel_cutoff_hours`; **R4-B-3:** `site_settings.booking_window_days`/`time_zone` + tabla `date_exceptions`) + índices únicos parciales de agenda; `references` entre comillas |
 | `content.ts` | Capa de datos (SOLO servidor): tipos fila/vista, `seedIfEmpty()`, lectores públicos y `...All`, mutadores validados que devuelven `SaveResult` (contenido, testimonios, enlaces, menú, redes, **`saveMapSettings`**), utilidades (`isLiveStatus`, `validSlug`, `validVideo`, `validHref`) |
 | `content/actions.ts` | Server actions: `currentProfile()` + RBAC por acción + `logAudit` + `invalidate(...)`; incluye `saveMap` |
-| `schedule.ts` | **Agenda real (R4-A; R4-B en construcción)**: reglas por pro/día (`seedRulesIfEmpty` desde `lib/data`), `openSlotsFor`/`daySlotsFor` (reglas − ocupación real), `createAppointment`/`rescheduleAppointment` (BEGIN IMMEDIATE + `ux_appt_slot` = 5.04), `cancelAppointment` (cutoff `cancel_cutoff_hours`, D-R4-3), `getAppointmentByToken`/`listAppointments`/`countUpcoming`, cola `notifications`, `saveRule`/`deleteRule`; **R4-B: `getProfessionalSchedule`, `monthSchedule` para la vista anual** |
+| `schedule.ts` | **Agenda real (R4-A; R4-B completo)**: reglas por pro/día (`seedRulesIfEmpty` desde `lib/data`), `openSlotsFor`/`daySlotsFor` (reglas − ocupación real − excepciones), `createAppointment`/`rescheduleAppointment` (BEGIN IMMEDIATE + `ux_appt_slot` = 5.04), `cancelAppointment` (cutoff `cancel_cutoff_hours`, D-R4-3), `getAppointmentByToken`/`listAppointments`/`countUpcoming`, cola `notifications`, `saveRule`/`deleteRule`; **R4-B: `getProfessionalSchedule`, `monthSchedule` para el calendario, `yearSchedule` (carga anual en 2 consultas), `listExceptions`/`saveException`/`deleteException`/`exceptionFor`, `getBookingWindowDays`/`getSiteTimeZone`** |
 | `schedule/actions.ts` | Server actions de agenda: públicas (`fetchAvailability`, `bookAppointment`, `cancelMyAppointment`, `rescheduleMyAppointment` — credencial = token del enlace) y de panel (`saveAvailabilityRule`, `deleteAvailabilityRule`, `adminCancelAppointment` — sesión + `canManageSchedule` + auditoría) |
 | `services/admin.ts` (nuevo, R4-B) | Servicios de la agenda: CRUD desde el panel, slug inmutable, baja lógica; lee/actualiza `service_catalog` en BD |
 | `professionals.ts` (nuevo, R4-B-2) | Profesionales de la agenda: capa de lectura de la tabla `professionals` (identidad) al tipo `Professional`; semilla demo desde `lib/data` si la BD está vacía; `getProfessionals()` (activos) y `getProfessionalsAll()` (panel); `upsertRulesForPro` alinea `availability_rules` con el perfil al guardar |
@@ -136,9 +137,9 @@
 | `public/uploads/` | Imágenes subidas del panel (servidas por `app/uploads/[name]/route.ts`) |
 | config | `package.json`, `next.config.ts`, `tsconfig.json`, `postcss.config.mjs`, `next-env.d.ts`, `package-lock.json`, `.gitignore`, `README.md` |
 
-### 2.5 `docs/` (9)
+### 2.5 `docs/` (12)
 
-`PROMPT.md` (contrato) · `MAPA_IMPACTO.md` (estrategia/epicas) · `BACKLOG.md` (maestro R0–R7) · `BACKLOG-R3.md` (release R3 + estado) · `BACKLOG-R4.md` (release en curso: agenda real, D-R4, sprints, gate) · `DEFINITION_OF_DONE.md` (R0–R2 sellado, histórico) · `ESTRUCTURA-DEL-CODIGO.md` (este) · `ORGANIZACION-DEL-PROYECTO.md` (crónica, decisiones, metodología) · `INVENTARIO.md` (máquina + §7 proyecto).
+`PROMPT.md` (contrato) · `MAPA_IMPACTO.md` (estrategia/epicas) · `BACKLOG.md` (maestro R0–R7) · `BACKLOG-R3.md` (release R3 + estado) · `BACKLOG-R4.md` (release en curso: agenda real, D-R4, sprints, gate) · `BACKLOG-R4-B.md` (sprint de corrección del flujo de agendado) · `DEFINITION_OF_DONE.md` (R0–R2 sellado, histórico) · `ESTRUCTURA-DEL-CODIGO.md` (este) · `ORGANIZACION-DEL-PROYECTO.md` (crónica, decisiones, metodología) · `PLAN-R4-B-1.md` / `PLAN-R4-B-2.md` / `PLAN-R4-B-BUG-1.md` (planes de sprint). El inventario de la máquina (`INVENTARIO.md`) se mudó a `~/INVENTARIO.md` — ya no vive en este repo.
 
 ---
 
@@ -159,7 +160,7 @@
 ### 4.1 Flujo de datos
 
 ```
-lib/data.ts (seed) ─seedIfEmpty()→ lib/db.ts (SQLite 16 tablas) ─┬→ lib/content.ts (lectores)  → app/*/page.tsx (RSC) → HTML
+lib/data.ts (seed) ─seedIfEmpty()→ lib/db.ts (SQLite 17 tablas) ─┬→ lib/content.ts (lectores)  → app/*/page.tsx (RSC) → HTML
                                                                  ├→ lib/content/actions.ts
                                                                  └→ lib/schedule.ts (agenda: reglas − ocupación) → /agendar, /mi-cita, /admin/horarios
    components/* ──(acciones)──▶ [público: token del enlace | panel: RBAC(currentProfile)] → mutador validado (TX) → logAudit → invalidate(paths)
@@ -189,7 +190,8 @@ Metadata + OG + Twitter card con `og.png`; `metadataBase` dominio `TODO:`; `site
 ```
 login → cookie rv_admin_session → layout valida sesión → AdminShell (nav por rol)
   /admin            dashboard          /admin/contenido   ContentHub      (canEditContent; borrar canAdmin)
-  /admin/horarios   ScheduleManager    (canManageSchedule: admin+terapeuta)
+  /admin/horarios   ScheduleManager    (canManageSchedule: admin+terapeuta; Citas · Horarios · Calendario anual + bloqueos)
+  /admin/ajustes    BookingSettings    (canAdmin: cutoff, ventana de reserva, zona horaria — R4-B-3)
   /admin/multimedia MediaLibrary       (canAdmin)         /admin/enlaces  LinksManager (canAdmin)
   /admin/menu       MenuManager (nav + redes + mapa)      (canAdmin)
   /admin/testimonios TestimonialsManager (consentimiento) (canAdmin)
@@ -210,7 +212,7 @@ login → cookie rv_admin_session → layout valida sesión → AdminShell (nav 
 - **Modo oscuro (8.14):** `html.dark` sobreescribe los tokens con `!important` (ganan a los inline del admin) + overrides de utilidades por ROL (`.bg-white`, `.bg-sage`, `.bg-terracotta`, `.text-mist*`, hovers) porque un token es superficie en unos componentes y texto en otros.
 - **Mapa (8.15):** los 4 tipos (placeholder/embed/iframe/enlace) existen porque la dirección real sigue sin definir (D1–D8).
 
-### 4.6 Modelo de datos (16 tablas)
+### 4.6 Modelo de datos (17 tablas)
 
 | Tabla | Claves/notas |
 |---|---|
@@ -219,7 +221,8 @@ login → cookie rv_admin_session → layout valida sesión → AdminShell (nav 
 | `testimonials` | `status` pendiente/aprobado; `consent` 0/1 — aprobar exige consentimiento |
 | `nav_items` / `link_items` | `position`, `visible` (+`is_primary` en link_items) |
 | `short_links` | PK `slug`, `target` (interno o URL) |
-| `site_settings` | Fila única: `instagram`, `facebook`, `map_type`/`map_query`/`map_url` (8.15), `cancel_cutoff_hours` (R4-A, D-R4-3: default 24) |
+| `site_settings` | Fila única: `instagram`, `facebook`, `map_type`/`map_query`/`map_url` (8.15), `cancel_cutoff_hours` (R4-A, D-R4-3: default 24), **`booking_window_days`** (R4-B-3, D-R4-B-5: default 365) y **`time_zone`** (R4-B-3, D-R4-4: default `America/Mexico_City`) — editables en `/admin/ajustes` |
+| **`date_exceptions`** (R4-B-3) | Bloqueos por fecha (5.02): `pro_id` (`*` = toda la clínica), rango `date_from`/`date_to` inclusivos, `kind` vacaciones/festivo/bloqueo, `note`, `active`; el motor los aplica en `daySlotsFor` (motivo `cerrado`) y `createAppointment` |
 | `theme_tokens` | Fila única: colores hex + fuentes curadas + `hero_image_id` |
 | `media_assets` | `kind`, `source`, `file_url`, `references` JSON (bloquean borrado en uso), `deleted_at` |
 | `audit_logs` | actor_email/actor_role/action/entity/entity_id/detail/created_at |
@@ -227,7 +230,7 @@ login → cookie rv_admin_session → layout valida sesión → AdminShell (nav 
 | **`availability_rules`** (R4-A) | Una fila por `(pro_id, day_of_week)` (UNIQUE); `open_hour`/`close_hour`/`active`; semilla demo desde `lib/data` (TODO D8) |
 | **`notifications`** (R4-A) | Cola de correos: `kind` (confirmacion/recordatorio/cancelacion…), `due_at`, `sent_at`, `provider` ('stub' hasta Resend) |
 
-Reglas: `created_at`/`updated_at`/`deleted_at` epoch ms; slug inmutable tras crear; `position` = max+1 si no se pasa; reordenar exige el set completo; `isLiveStatus = publicado O (programado Y fecha vencida)`; citas: ventana 1–21 días, cutoff de auto-gestión `cancel_cutoff_hours`, alta/movimiento SIEMPRE en `BEGIN IMMEDIATE`.
+Reglas: `created_at`/`updated_at`/`deleted_at` epoch ms; slug inmutable tras crear; `position` = max+1 si no se pasa; reordenar exige el set completo; `isLiveStatus = publicado O (programado Y fecha vencida)`; citas: ventana desde mañana hasta `booking_window_days` (default 365, editable en Ajustes), cutoff de auto-gestión `cancel_cutoff_hours`, alta/movimiento SIEMPRE en `BEGIN IMMEDIATE`.
 
 ---
 

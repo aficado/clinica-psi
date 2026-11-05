@@ -26,13 +26,18 @@ import { isoLocal } from "@/lib/schedule";
 import {
   cancelAppointment,
   createAppointment,
+  deleteException,
   deleteRule,
   daySlotsFor,
+  listExceptions,
   monthSchedule,
   rescheduleAppointment,
+  saveException,
   saveRule,
   type BookingInput,
   type DaySlotsWithReason,
+  type ExceptionInput,
+  type ExceptionView,
 } from "@/lib/schedule";
 
 const SESSION_COOKIE = "rv_admin_session";
@@ -178,6 +183,52 @@ export async function adminCancelAppointment(token: string): Promise<Result> {
   const res = cancelAppointment(token, { enforceCutoff: false, reason: "cancelada desde el panel" });
   if (res.ok) {
     logAudit(guard.actor, "cita.cancelar-admin", "appointment", token);
+    revalidatePath("/admin/horarios");
+  }
+  return res;
+}
+
+// ------------------------------------------------------------
+// Excepciones por fecha (R4-B-3, PB-3): vacaciones / festivos / bloqueo
+
+type ExceptionsResult =
+  | { ok: true; exceptions: ExceptionView[] }
+  | { ok: false; error: string };
+
+/** Lista los bloqueos por fecha para el panel. */
+export async function fetchExceptions(): Promise<ExceptionsResult> {
+  const guard = await guardSchedule();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  return { ok: true, exceptions: listExceptions() };
+}
+
+/** Alta/edición de un bloqueo por rango de fechas (5.02). */
+export async function saveDateException(
+  input: ExceptionInput,
+): Promise<{ ok: true; id: number } | { ok: false; error: string }> {
+  const guard = await guardSchedule();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  const res = saveException(input);
+  if (res.ok) {
+    logAudit(
+      guard.actor,
+      input.id != null ? "excepcion.actualizar" : "excepcion.crear",
+      "date_exception",
+      String(res.id),
+      `${input.proId} ${input.dateFrom}..${input.dateTo} ${input.kind}`,
+    );
+    revalidatePath("/admin/horarios");
+  }
+  return res;
+}
+
+/** Borra un bloqueo: los días vuelven a ofrecer sus horarios. */
+export async function deleteDateException(id: number): Promise<{ ok: true } | { ok: false; error: string }> {
+  const guard = await guardSchedule();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  const res = deleteException(id);
+  if (res.ok) {
+    logAudit(guard.actor, "excepcion.borrar", "date_exception", String(id));
     revalidatePath("/admin/horarios");
   }
   return res;

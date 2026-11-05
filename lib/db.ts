@@ -375,6 +375,44 @@ function ensureSchema(conn: DatabaseSync): void {
     );
   }
 
+  // Excepciones por fecha (R4-B-3, 5.02): bloqueos tipo vacaciones/festivo
+  // por profesional (`pro_id`) o para todos (`*`), en un rango ISO inclusivo.
+  // El motor (`lib/schedule.ts`) los trata como día sin horarios y la
+  // reserva los rechaza; borrar la excepción libera el día.
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS date_exceptions (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      pro_id     TEXT NOT NULL,
+      date_from  TEXT NOT NULL,
+      date_to    TEXT NOT NULL,
+      kind       TEXT NOT NULL DEFAULT 'vacaciones',
+      note       TEXT NOT NULL DEFAULT '',
+      active     INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+  `);
+  conn.exec(`
+    CREATE INDEX IF NOT EXISTS ix_exception_pro_range
+      ON date_exceptions(pro_id, date_from, date_to);
+  `);
+
+  // R4-B-3 (D-R4-B-5): ventana de reserva editable (default = la constante
+  // BOOKING_WINDOW_DAYS de toda la vida) y zona horaria explícita (D-R4-4).
+  const bookingSiteCols = conn
+    .prepare("PRAGMA table_info(site_settings)")
+    .all() as Array<{ name: string }>;
+  if (!bookingSiteCols.some((c) => c.name === "booking_window_days")) {
+    conn.exec(
+      "ALTER TABLE site_settings ADD COLUMN booking_window_days INTEGER NOT NULL DEFAULT 365;",
+    );
+  }
+  if (!bookingSiteCols.some((c) => c.name === "time_zone")) {
+    conn.exec(
+      "ALTER TABLE site_settings ADD COLUMN time_zone TEXT NOT NULL DEFAULT 'America/Mexico_City';",
+    );
+  }
+
   // 8.13: `media_assets` gana borrado blando. `ALTER TABLE ADD COLUMN`
   // falla si la columna ya existe, así se comprueba antes.
   const mediaCols = conn

@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { getSessionProfile } from "@/lib/admin/session";
 import { canManageSchedule } from "@/lib/rbac";
 import { getProfessionals } from "@/lib/professionals";
-import { getRules, listAppointments } from "@/lib/schedule";
+import { getRules, listAppointments, listExceptions, yearSchedule } from "@/lib/schedule";
 import { Icon } from "@/components/ui";
 import { ScheduleManager } from "@/components/admin/ScheduleManager";
 
@@ -14,16 +14,29 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Agenda y horarios",
-  description: "Citas registradas y horarios de atención por profesional.",
+  description: "Citas registradas, horarios de atención y vista anual por profesional.",
 };
 
+/** Año permitido en la vista anual: del anterior (histórico) a +3 (R4-B-3). */
+function clampYear(raw: unknown): number {
+  const now = new Date().getFullYear();
+  const n = Number(typeof raw === "string" ? raw : NaN);
+  if (!Number.isInteger(n)) return now;
+  return Math.min(now + 3, Math.max(now - 1, n));
+}
+
 /**
- * Módulo Agenda (R4-A, 5.10 parcial): ver/cancelar citas reales y
- * editar los horarios por día de cada profesional (5.02). Acceso:
- * administrador y terapeuta (`canManageSchedule`); asistente fuera
- * (TODO: decidir si recepción también agenda — nota D-R4).
+ * Módulo Agenda (R4-A, 5.10 parcial; R4-B-3 añade la pestaña
+ * "Calendario" con la vista anual por profesional y los bloqueos por
+ * fecha — PB-2/PB-3). Acceso: administrador y terapeuta
+ * (`canManageSchedule`); asistente fuera (TODO: decidir si recepción
+ * también agenda — nota D-R4).
  */
-export default async function HorariosPage() {
+export default async function HorariosPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const token = (await cookies()).get(SESSION_COOKIE)?.value ?? null;
   const profile = getSessionProfile(token);
   if (!profile) {
@@ -40,19 +53,31 @@ export default async function HorariosPage() {
     );
   }
 
+  const sp = await searchParams;
+  const pros = getProfessionals();
+  const year = clampYear(sp.year);
+  const proArg = typeof sp.pro === "string" ? sp.pro : "";
+  const proId = pros.some((p) => p.id === proArg) ? proArg : (pros[0]?.id ?? "");
+  const initialTab = sp.tab === "calendario" || sp.tab === "horarios" ? sp.tab : "agenda";
+
   return (
     <div className="mx-auto w-full max-w-5xl">
       <div className="mb-8">
         <h1 className="text-3xl font-semibold text-ink">Agenda y horarios</h1>
         <p className="mt-1.5 text-ink-soft">
-          Las citas que agenda la gente desde el sitio aparecen aquí. Puedes cancelarlas y
-          ajustar en qué días y horas atiende cada profesional.
+          Las citas que agenda la gente desde el sitio aparecen aquí. Puedes cancelarlas, ajustar
+          en qué días y horas atiende cada profesional y ver el año completo en Calendario.
         </p>
       </div>
       <ScheduleManager
         rules={getRules()}
         appointments={listAppointments()}
-        professionals={getProfessionals()}
+        professionals={pros}
+        initialTab={initialTab}
+        year={year}
+        proId={proId}
+        yearDays={proId ? yearSchedule(proId, year) : []}
+        exceptions={listExceptions()}
       />
     </div>
   );

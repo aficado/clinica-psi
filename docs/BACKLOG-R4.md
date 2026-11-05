@@ -41,8 +41,8 @@ BD, la ocupación es real y el enlace `/mi-cita/<token>` funciona desde cualquie
 | ID | Situación |
 |---|---|
 | 5.01 | ✅ 🔶 en SQLite; ✅ servicios configurables desde el panel (tabla `services` de Contenido + vista `/admin/servicios`, R4-B-2) |
-| 5.02 | 🔶 reglas por día/profesional editables; ⬜ excepciones por fecha (R4-B-3) |
-| 5.03 | ✅ motor de disponibilidad real; ✅ calendario del flujo público **ampliado a mes entero/año completo** (R4-B-1); ⬜ vista de calendario admin + zona horaria configurable (R4-B-3) |
+| 5.02 | ✅ reglas por día/profesional editables; ✅ **excepciones por fecha (R4-B-3):** bloqueos vacaciones/festivos por rango (`date_exceptions`, pro o toda la clínica) con CRUD en la pestaña Calendario del panel |
+| 5.03 | ✅ motor de disponibilidad real; ✅ calendario del flujo público **ampliado a mes entero/año completo** (R4-B-1); ✅ **vista de calendario anual del admin + ventana y zona horaria configurables** (R4-B-3) |
 | 5.04 | ✅ **doble garantía**: check transaccional + índice único parcial; prueba `check:agenda` PASS |
 | 5.05 | 🔶 flujo 4 pasos sobre BD; ✅ **cookies `booking_state`** implementadas y restauración validada (R4-B-1); ⬜ nada adicional pendiente |
 | 5.05b | ✅ **profesionales configurables en el panel** (tabla `professionals` + `/admin/profesionales` con alta/edición/activar/baja, R4-B-2) |

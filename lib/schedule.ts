@@ -13,8 +13,9 @@
 // dos pedidos paralelos sobre el mismo slot → uno gana, el otro
 // recibe "Ese horario ya no está disponible".
 //
-// Zona horaria: se usa la del servidor (en el despliegue,
-// America/Mexico_City). Configuración explícita: TODO (5.03).
+// Zona horaria: `site_settings.time_zone` (default America/Mexico_City,
+// editable en `/admin/ajustes` — R4-B-3/D-R4-4). El cálculo de días sigue
+// siendo local al servidor: en el despliegue ambos valores coinciden.
 //
 // SOLO SERVIDOR: usa `lib/db.ts` (`node:sqlite`). No importar desde
 // componentes de cliente (solo tipos, con `import type`).
@@ -22,12 +23,12 @@
 
 import { randomBytes } from "node:crypto";
 import { clinic, type Professional } from "./data";
-import { getProfessionals } from "@/lib/professionals";
+import { getProfessionals, getProfessionalsAll } from "@/lib/professionals";
 import { getServices, getServicesAll } from "./content";
 import { professionalsFor } from "./slots";
 import { getDb } from "./db";
 
-/** Ventana de agendamiento (D-R4-B-5: decidir si es fija o editable desde Ajustes). Hoy se usa para la ventana que el admin puede abrir/cerrar. */
+/** Ventana de agendamiento por defecto (D-R4-B-5 resuelta: es editable en `/admin/ajustes`; esto es el default de la columna `booking_window_days`). */
 export const BOOKING_WINDOW_DAYS = 365;
 
 export interface DaySlots {
@@ -35,12 +36,14 @@ export interface DaySlots {
   hours: { hour: number; taken: boolean }[];
 }
 
-/** Motivo por el que un día no tiene horarios (fuera de regla / sin cupo). */
-export type DayReason = "no_atiende" | "sin_cupo" | null;
+/** Motivo por el que un día no tiene horarios (fuera de regla / sin cupo / bloqueado R4-B-3). */
+export type DayReason = "no_atiende" | "sin_cupo" | "cerrado" | null;
 
 export interface DaySlotsWithReason extends DaySlots {
   reason: DayReason;
   freeCount: number;
+  /** PB-3: etiqueta del bloqueo cuando `reason === "cerrado"` (p. ej. "Vacaciones: puente"). */
+  blockedLabel?: string;
 }
 
 export type ApptStatus = "confirmada" | "cancelada" | "completada";
@@ -193,13 +196,33 @@ export function getRules(): RuleView[] {
   }));
 }
 
-/** Anticipación mínima para cancelar/reprogramar (5.07). TODO (D4): decisión del dueño; default 24 h. */
+/** Anticipación mínima para cancelar/reprogramar (5.07). Default 24 h, editable en `/admin/ajustes` (R4-B-3). */
 export function getCancellationCutoffHours(): number {
   const row = getDb()
     .prepare("SELECT cancel_cutoff_hours FROM site_settings WHERE id = 'current'")
     .get() as { cancel_cutoff_hours?: number } | undefined;
   const v = row?.cancel_cutoff_hours ?? 24;
   return Number.isFinite(v) && v >= 0 ? Math.floor(v) : 24;
+}
+
+/**
+ * Ventana de reserva en días (R4-B-3, D-R4-B-5): editable desde Ajustes,
+ * clamp 1–730; el default histórico es `BOOKING_WINDOW_DAYS` (365).
+ */
+export function getBookingWindowDays(): number {
+  const row = getDb()
+    .prepare("SELECT booking_window_days FROM site_settings WHERE id = 'current'")
+    .get() as { booking_window_days?: number } | undefined;
+  const v = row?.booking_window_days ?? BOOKING_WINDOW_DAYS;
+  return Number.isFinite(v) ? Math.min(730, Math.max(1, Math.floor(v))) : BOOKING_WINDOW_DAYS;
+}
+
+/** Zona horaria del sitio (R4-B-3, D-R4-4). La usan las vistas del panel. */
+export function getSiteTimeZone(): string {
+  const row = getDb()
+    .prepare("SELECT time_zone FROM site_settings WHERE id = 'current'")
+    .get() as { time_zone?: string } | undefined;
+  return row?.time_zone || "America/Mexico_City";
 }
 
 /** Regla activa del profesional en `dateIso` (incluye el sábado opcional). */
@@ -228,6 +251,18 @@ function takenSet(proId: string, first: string, last: string): Set<string> {
 
 /** Slots de un día concreto (5.03/5.04): la ventana se abre en el año completo. */
 export function daySlotsFor(dateIso: string, proId: string): DaySlotsWithReason {
+  // PB-3 (R4-B-3): un día bloqueado por excepción (vacaciones/festivo) no
+  // ofrece horarios, tenga o no regla el profesional ese día.
+  const ex = exceptionFor(proId, dateIso);
+  if (ex)
+    return {
+      dateIso,
+      hours: [],
+      reason: "cerrado",
+      freeCount: 0,
+      blockedLabel: exceptionLabel(ex),
+    };
+
   const rule = getRule(proId, dateIso);
   if (!rule)
     return {
@@ -302,11 +337,17 @@ function slotCandidateError(
     return "Ese profesional no atiende este servicio en esa modalidad.";
   const d0 = new Date(`${addDaysIso(1)}T12:00:00`);
   const dSel = new Date(`${dateIso}T12:00:00`);
+  const windowDays = getBookingWindowDays();
   const max = new Date(d0);
-  max.setDate(max.getDate() + BOOKING_WINDOW_DAYS - 1);
-  if (dSel < d0 || dSel > max) return "Solo puedes agendar entre mañana y dentro de 21 días.";
+  max.setDate(max.getDate() + windowDays - 1);
+  if (dSel < d0 || dSel > max)
+    return `Solo puedes agendar entre mañana y dentro de ${windowDays} días.`;
   const rule = getRules().find((r) => r.active && r.proId === proId && r.dow === hourOfIso(dateIso));
   if (!rule) return "Ese día el profesional no atiende. Elige otro.";
+  // PB-3 (R4-B-3): el bloqueo por excepción también corta por API (no solo
+  // en la vista): aunque alguien mande el slot a mano, no se agenda.
+  const ex = exceptionFor(proId, dateIso);
+  if (ex) return `Ese día está bloqueado en la agenda (${exceptionLabel(ex)}). Elige otro.`;
   const blocks = Math.max(1, Math.ceil(svc.duration / 60));
   if (hour < rule.open || hour + blocks > rule.close) return "Esa hora está fuera del horario del profesional.";
   return null;
@@ -357,6 +398,200 @@ export function saveRule(input: {
 export function deleteRule(id: number): { ok: true } | { ok: false; error: string } {
   const res = getDb().prepare("DELETE FROM availability_rules WHERE id = ?").run(id);
   return res.changes > 0 ? { ok: true } : { ok: false, error: "Ese horario ya no existe." };
+}
+
+// ------------------------------------------------------------
+// Excepciones por fecha (R4-B-3, 5.02): vacaciones / festivos / bloqueo.
+// `pro_id = "*"` aplica a todos los profesionales (festivos de la clínica).
+// Un día con excepción activa no ofrece horarios (`daySlotsFor` → "cerrado")
+// y `createAppointment` lo rechaza, aunque llegue el slot a mano.
+// ------------------------------------------------------------
+
+export type ExceptionKind = "vacaciones" | "festivo" | "bloqueo";
+const EXCEPTION_KINDS: ExceptionKind[] = ["vacaciones", "festivo", "bloqueo"];
+
+export interface ExceptionView {
+  id: number;
+  /** `*` = todos los profesionales. */
+  proId: string;
+  dateFrom: string; // YYYY-MM-DD (inclusivo)
+  dateTo: string; // YYYY-MM-DD (inclusivo)
+  kind: ExceptionKind;
+  note: string;
+  active: boolean;
+}
+
+export interface ExceptionInput {
+  id?: number;
+  proId: string;
+  dateFrom: string;
+  dateTo: string;
+  kind: string;
+  note: string;
+  active: boolean;
+}
+
+interface ExceptionRow {
+  id: number;
+  pro_id: string;
+  date_from: string;
+  date_to: string;
+  kind: string;
+  note: string;
+  active: number;
+}
+
+function rowToException(r: ExceptionRow): ExceptionView {
+  return {
+    id: r.id,
+    proId: r.pro_id,
+    dateFrom: r.date_from,
+    dateTo: r.date_to,
+    kind: EXCEPTION_KINDS.includes(r.kind as ExceptionKind) ? (r.kind as ExceptionKind) : "bloqueo",
+    note: r.note,
+    active: r.active === 1,
+  };
+}
+
+/** Etiqueta legible del bloqueo para la UI y los mensajes de error. */
+export function exceptionLabel(e: { kind: string; note: string }): string {
+  const base = e.kind === "vacaciones" ? "Vacaciones" : e.kind === "festivo" ? "Festivo" : "Bloqueo";
+  const note = e.note.trim();
+  return note ? `${base}: ${note}` : base;
+}
+
+export function listExceptions(): ExceptionView[] {
+  const rows = getDb()
+    .prepare("SELECT * FROM date_exceptions ORDER BY date_from DESC, id DESC")
+    .all() as unknown as ExceptionRow[];
+  return rows.map(rowToException);
+}
+
+/** Excepción activa que cubre `dateIso` para `proId` (incluye el `*` de clínica). */
+export function exceptionFor(proId: string, dateIso: string): ExceptionView | undefined {
+  if (!ISO_DATE_RE.test(dateIso)) return undefined;
+  const row = getDb()
+    .prepare(
+      `SELECT * FROM date_exceptions
+       WHERE active = 1 AND (pro_id = ? OR pro_id = '*') AND ? BETWEEN date_from AND date_to
+       ORDER BY (pro_id != '*') DESC, id DESC LIMIT 1`,
+    )
+    .get(proId, dateIso) as ExceptionRow | undefined;
+  return row ? rowToException(row) : undefined;
+}
+
+export function saveException(input: ExceptionInput): { ok: true; id: number } | { ok: false; error: string } {
+  const proId = String(input.proId ?? "").trim();
+  if (!proId) return { ok: false, error: "Elige el profesional (o 'todos') que se bloquea." };
+  if (proId !== "*" && !getProfessionalsAll().some((p) => p.id === proId))
+    return { ok: false, error: "Ese profesional no existe." };
+  if (!ISO_DATE_RE.test(input.dateFrom) || !ISO_DATE_RE.test(input.dateTo))
+    return { ok: false, error: "Las fechas deben tener el formato AAAA-MM-DD." };
+  if (input.dateFrom > input.dateTo)
+    return { ok: false, error: "La fecha inicial no puede ser posterior a la final." };
+  const spanDays = Math.round(
+    (new Date(`${input.dateTo}T12:00:00`).getTime() - new Date(`${input.dateFrom}T12:00:00`).getTime()) / 86_400_000,
+  );
+  if (spanDays > 366) return { ok: false, error: "El bloqueo puede cubrir como máximo un año." };
+  const kind = String(input.kind ?? "").trim() as ExceptionKind;
+  if (!EXCEPTION_KINDS.includes(kind)) return { ok: false, error: "El tipo de bloqueo no es válido." };
+  const note = String(input.note ?? "").trim().slice(0, 200);
+  const now = Date.now();
+
+  if (input.id != null) {
+    const res = getDb()
+      .prepare(
+        `UPDATE date_exceptions SET pro_id = ?, date_from = ?, date_to = ?, kind = ?, note = ?, active = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(proId, input.dateFrom, input.dateTo, kind, note, input.active ? 1 : 0, now, input.id);
+    if (res.changes === 0) return { ok: false, error: "Ese bloqueo ya no existe." };
+    return { ok: true, id: input.id };
+  }
+  // Duplicado exacto (mismo pro y rango): no se crea dos veces.
+  const dup = getDb()
+    .prepare(
+      `SELECT id FROM date_exceptions WHERE pro_id = ? AND date_from = ? AND date_to = ? LIMIT 1`,
+    )
+    .get(proId, input.dateFrom, input.dateTo) as { id: number } | undefined;
+  if (dup) return { ok: false, error: "Ya existe un bloqueo con esas fechas para ese profesional." };
+  const res = getDb()
+    .prepare(
+      `INSERT INTO date_exceptions (pro_id, date_from, date_to, kind, note, active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(proId, input.dateFrom, input.dateTo, kind, note, input.active ? 1 : 0, now, now);
+  return { ok: true, id: Number(res.lastInsertRowid) };
+}
+
+export function deleteException(id: number): { ok: true } | { ok: false; error: string } {
+  const res = getDb().prepare("DELETE FROM date_exceptions WHERE id = ?").run(id);
+  return res.changes > 0 ? { ok: true } : { ok: false, error: "Ese bloqueo ya no existe." };
+}
+
+// ------------------------------------------------------------
+// Vista anual del panel (R4-B-3, D-R4-B-7): carga por día del año.
+// Se calcula con 2 consultas (citas + excepciones del año), NO con 365
+// llamadas a `daySlotsFor`. Los días futuros pasados de la ventana de
+// reserva se muestran igual (aquí la ventana es informativa).
+
+export interface YearDay {
+  dateIso: string;
+  /** Slots libres del día (0 si no atiende / bloqueado / lleno). */
+  free: number;
+  /** Citas confirmadas del día. */
+  taken: number;
+  reason: DayReason;
+  /** Etiqueta del bloqueo cuando `reason === "cerrado"`. */
+  blocked?: string;
+}
+
+export function yearSchedule(proId: string, year: number): YearDay[] {
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) return [];
+  const first = `${year}-01-01`;
+  const last = `${year}-12-31`;
+  const rules = getRules().filter((r) => r.active && r.proId === proId);
+
+  const takenByDate = new Map<string, number>();
+  const apptRows = getDb()
+    .prepare(
+      `SELECT date, COUNT(*) AS n FROM appointments
+       WHERE pro_id = ? AND status = 'confirmada' AND date BETWEEN ? AND ?
+       GROUP BY date`,
+    )
+    .all(proId, first, last) as unknown as Array<{ date: string; n: number }>;
+  for (const r of apptRows) takenByDate.set(r.date, r.n);
+
+  const exRows = getDb()
+    .prepare(
+      `SELECT * FROM date_exceptions
+       WHERE active = 1 AND (pro_id = ? OR pro_id = '*') AND NOT (date_to < ? OR date_from > ?)`,
+    )
+    .all(proId, first, last) as unknown as ExceptionRow[];
+
+  const out: YearDay[] = [];
+  for (let m = 1; m <= 12; m++) {
+    const ym = `${year}-${String(m).padStart(2, "0")}`;
+    const lastDay = getLastDayOfMonth(`${ym}-01`);
+    for (let d = 1; d <= lastDay; d++) {
+      const dateIso = `${ym}-${String(d).padStart(2, "0")}`;
+      const ex = exRows.find((e) => e.date_from <= dateIso && dateIso <= e.date_to);
+      if (ex) {
+        out.push({ dateIso, free: 0, taken: takenByDate.get(dateIso) ?? 0, reason: "cerrado", blocked: exceptionLabel(ex) });
+        continue;
+      }
+      const rule = rules.find((r) => r.dow === hourOfIso(dateIso));
+      if (!rule) {
+        out.push({ dateIso, free: 0, taken: takenByDate.get(dateIso) ?? 0, reason: "no_atiende" });
+        continue;
+      }
+      const slots = Math.max(0, rule.close - rule.open);
+      const taken = takenByDate.get(dateIso) ?? 0;
+      const free = Math.max(0, slots - taken);
+      out.push({ dateIso, free, taken, reason: slots > 0 && free === 0 ? "sin_cupo" : null });
+    }
+  }
+  return out;
 }
 
 // ------------------------------------------------------------

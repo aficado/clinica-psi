@@ -37,6 +37,7 @@ import {
   restoreBySlug,
   restoreShortLink as restoreShortLinkRow,
   saveArticle as saveArticleRow,
+  saveBookingSettings as saveBookingSettingsRow,
   saveCourse as saveCourseRow,
   saveLinkItem as saveLinkItemRow,
   saveMapSettings as saveMapSettingsRow,
@@ -466,5 +467,29 @@ export async function saveMap(input: {
   if (!res.ok) return res;
   logAudit(p, "sitio.mapa", "sitio", "current", `tipo=${input.mapType || "placeholder"}`);
   invalidate("/", "/contacto");
+  return res;
+}
+
+/**
+ * Ajustes de agenda (R4-B-3, PB-1): anticipación para cancelar, ventana
+ * de reserva y zona horaria. Solo admin; queda en Auditoría.
+ */
+export async function saveBooking(input: {
+  cancelCutoffHours: number;
+  bookingWindowDays: number;
+  timeZone: string;
+}): Promise<SaveResult> {
+  const p = await currentProfile();
+  if (!canAdmin(p.role)) return NOT_ALLOWED;
+  const res = saveBookingSettingsRow(input);
+  if (!res.ok) return res;
+  logAudit(
+    p,
+    "sitio.ajustes-agenda",
+    "sitio",
+    "current",
+    `cutoff=${input.cancelCutoffHours}h ventana=${input.bookingWindowDays}d zona=${input.timeZone}`,
+  );
+  invalidate("/", "/agendar");
   return res;
 }

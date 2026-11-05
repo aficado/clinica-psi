@@ -222,6 +222,10 @@ export interface SiteSettings {
   mapType: "" | "embed" | "iframe" | "link";
   mapQuery: string;
   mapUrl: string;
+  /** Ajustes de agenda (R4-B-3): política editable desde `/admin/ajustes`. */
+  cancelCutoffHours: number;
+  bookingWindowDays: number;
+  timeZone: string;
 }
 
 // ============================================================
@@ -888,7 +892,16 @@ export function getSiteSettings(): SiteSettings {
   const row = getDb()
     .prepare(`SELECT * FROM site_settings WHERE id = 'current'`)
     .get() as
-    | { instagram: string; facebook: string; map_type?: string; map_query?: string; map_url?: string }
+    | {
+        instagram: string;
+        facebook: string;
+        map_type?: string;
+        map_query?: string;
+        map_url?: string;
+        cancel_cutoff_hours?: number;
+        booking_window_days?: number;
+        time_zone?: string;
+      }
     | undefined;
   const mapType = (row?.map_type ?? "") as SiteSettings["mapType"];
   return {
@@ -897,6 +910,9 @@ export function getSiteSettings(): SiteSettings {
     mapType: ["", "embed", "iframe", "link"].includes(mapType) ? mapType : "",
     mapQuery: row?.map_query ?? "",
     mapUrl: row?.map_url ?? "",
+    cancelCutoffHours: Number.isFinite(row?.cancel_cutoff_hours) ? Math.floor(row!.cancel_cutoff_hours!) : 24,
+    bookingWindowDays: Number.isFinite(row?.booking_window_days) ? Math.floor(row!.booking_window_days!) : 365,
+    timeZone: row?.time_zone || "America/Mexico_City",
   };
 }
 
@@ -1519,6 +1535,46 @@ export function saveMapSettings(input: {
       `UPDATE site_settings SET map_type = ?, map_query = ?, map_url = ?, updated_at = ? WHERE id = 'current'`,
     )
     .run(mapType, mapQuery, mapUrl, Date.now());
+  if (res.changes === 0) {
+    return { ok: false, error: "No se encontraron los ajustes del sitio." };
+  }
+  return { ok: true };
+}
+
+/**
+ * Ajustes de agenda (R4-B-3): anticipación para cancelar, ventana de
+ * reserva y zona horaria. Validación dura aquí (la UI solo facilita
+ * opciones); los consumidores leen los valores con
+ * `getCancellationCutoffHours` / `getBookingWindowDays` / `getSiteTimeZone`.
+ */
+export function saveBookingSettings(input: {
+  cancelCutoffHours: number;
+  bookingWindowDays: number;
+  timeZone: string;
+}): SaveResult {
+  seedIfEmpty();
+  const cutoff = Math.floor(Number(input.cancelCutoffHours));
+  if (!Number.isInteger(cutoff) || cutoff < 0 || cutoff > 720) {
+    return { ok: false, error: "La anticipación debe ser un número entero de 0 a 720 horas." };
+  }
+  const windowDays = Math.floor(Number(input.bookingWindowDays));
+  if (!Number.isInteger(windowDays) || windowDays < 1 || windowDays > 730) {
+    return { ok: false, error: "La ventana de reserva debe ser de 1 a 730 días." };
+  }
+  const timeZone = str(input.timeZone).trim() || "America/Mexico_City";
+  try {
+    new Intl.DateTimeFormat("es-MX", { timeZone }).format(new Date());
+  } catch {
+    return {
+      ok: false,
+      error: "La zona horaria no es válida (formato Zona/Región, p. ej. America/Mexico_City).",
+    };
+  }
+  const res = getDb()
+    .prepare(
+      `UPDATE site_settings SET cancel_cutoff_hours = ?, booking_window_days = ?, time_zone = ?, updated_at = ? WHERE id = 'current'`,
+    )
+    .run(cutoff, windowDays, timeZone, Date.now());
   if (res.changes === 0) {
     return { ok: false, error: "No se encontraron los ajustes del sitio." };
   }

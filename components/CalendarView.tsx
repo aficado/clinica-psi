@@ -145,7 +145,9 @@ export function CalendarView({
                 className={cn(
                   "min-h-11 rounded-(--radius-btn) border-2 px-1 py-1.5 text-sm font-semibold transition-colors",
                   !available
-                    ? "cursor-not-allowed border-mist bg-mist/40 text-ink-soft"
+                    ? info.reason === "cerrado"
+                      ? "cursor-not-allowed border-terracotta/50 bg-terracotta/15 text-terracotta-dark"
+                      : "cursor-not-allowed border-mist bg-mist/40 text-ink-soft"
                     : selected
                       ? "border-sage bg-sage text-white"
                       : "border-sage/40 bg-white text-ink hover:border-sage hover:bg-sage/10",
@@ -245,6 +247,8 @@ function formatDateLongMX(iso: string): string {
 /** Título de ayuda para un día (accesibilidad: el motivo se lee con el lector de pantalla). */
 function dayTitle(info: DaySlotsWithReason, past: boolean): string {
   if (past) return "Este día ya pasó.";
+  if (info.reason === "cerrado")
+    return `El profesional no atiende este día (${info.blockedLabel ?? "día bloqueado"}).`;
   if (info.reason === "no_atiende") return "El profesional no atiende este día.";
   if (info.freeCount === 0) return "Sin cupos en este día.";
   return `${info.freeCount} horarios libres el ${info.dateIso}.`;

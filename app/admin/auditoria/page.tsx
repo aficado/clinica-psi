@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { getSessionProfile } from "@/lib/admin/session";
 import { canAdmin } from "@/lib/rbac";
 import { getAuditLogs } from "@/lib/audit";
+import { getSiteTimeZone } from "@/lib/schedule";
 import { asString } from "@/lib/utils";
 import { Icon } from "@/components/ui";
 
@@ -23,7 +24,8 @@ function formatWhen(ms: number): string {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-    timeZone: "America/Mexico_City",
+    // Zona horaria configurable del sitio (R4-B-3, D-R4-4; default la de MX).
+    timeZone: getSiteTimeZone(),
   });
 }
 

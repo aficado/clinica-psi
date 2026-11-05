@@ -37,7 +37,7 @@ const navItems: Array<{
   { id: "menu", label: "Menú y redes", href: "/admin/menu", icon: "menu", roles: ["admin"] },
   { id: "auditoria", label: "Auditoría", href: "/admin/auditoria", icon: "shield", roles: ["admin"] },
   { id: "usuarios", label: "Usuarios y roles", href: "/admin/usuarios", icon: "user", roles: ["admin"], comingSoon: true },
-  { id: "ajustes", label: "Ajustes", href: "/admin/ajustes", icon: "shield", roles: ["admin"], comingSoon: true },
+  { id: "ajustes", label: "Ajustes", href: "/admin/ajustes", icon: "shield", roles: ["admin"] },
 ];
 
 const roleLabels: Record<RoleId, string> = {
