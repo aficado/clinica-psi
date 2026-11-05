@@ -530,6 +530,167 @@ export function deleteException(id: number): { ok: true } | { ok: false; error: 
 }
 
 // ------------------------------------------------------------
+// Operaciones POR DÍA (R4-B-UX-1): el admin bloquea/libera UN día exacto
+// haciendo clic en el calendario. Cada operación devuelve `DayOpUndo`, el
+// inverso exacto (ids + valores anteriores), para poder "Deshacer".
+
+/** Inverso de una operación de día: `before` = filas como estaban; `created` = ids nuevos. */
+export interface DayOpUndo {
+  dayIso: string;
+  proId: string;
+  before: ExceptionView[];
+  created: number[];
+}
+
+/** Bloqueos que cubren `dateIso` (para el panel del día). `includeInactive` para mostrarlos también. */
+export function exceptionsCovering(
+  proId: string,
+  dateIso: string,
+  opts: { includeInactive?: boolean } = {},
+): ExceptionView[] {
+  if (!ISO_DATE_RE.test(dateIso)) return [];
+  const rows = getDb()
+    .prepare(
+      `SELECT * FROM date_exceptions
+       WHERE (pro_id = ? OR pro_id = '*') AND ? BETWEEN date_from AND date_to
+       ORDER BY (pro_id = '*') DESC, id DESC`,
+    )
+    .all(proId, dateIso) as unknown as ExceptionRow[];
+  const out = rows.map(rowToException);
+  return opts.includeInactive ? out : out.filter((e) => e.active);
+}
+
+const isIso = (s: string) => ISO_DATE_RE.test(s);
+const shiftIso = (iso: string, delta: number): string => {
+  const d = new Date(`${iso}T12:00:00`);
+  d.setDate(d.getDate() + delta);
+  return isoLocal(d);
+};
+
+/** Bloquea exactamente `dateIso` para `proId` (`*` = clínica). */
+export function blockDay(
+  proId: string,
+  dateIso: string,
+  kind: string,
+  note: string,
+): { ok: true; undo: DayOpUndo } | { ok: false; error: string } {
+  const scope = String(proId ?? "").trim();
+  if (!scope) return { ok: false, error: "Elige el profesional (o toda la clínica)." };
+  if (scope !== "*" && !getProfessionalsAll().some((p) => p.id === scope))
+    return { ok: false, error: "Ese profesional no existe." };
+  if (!isIso(dateIso)) return { ok: false, error: "La fecha no es válida." };
+  const k = String(kind ?? "").trim() as ExceptionKind;
+  if (!EXCEPTION_KINDS.includes(k)) return { ok: false, error: "El tipo de bloqueo no es válido." };
+  if (exceptionsCovering(scope, dateIso).length > 0)
+    return { ok: false, error: "Ese día ya está bloqueado." };
+
+  const now = Date.now();
+  const res = getDb()
+    .prepare(
+      `INSERT INTO date_exceptions (pro_id, date_from, date_to, kind, note, active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+    )
+    .run(scope, dateIso, dateIso, k, String(note ?? "").trim().slice(0, 200), now, now);
+  return {
+    ok: true,
+    undo: { dayIso: dateIso, proId: scope, before: [], created: [Number(res.lastInsertRowid)] },
+  };
+}
+
+/**
+ * Libera exactamente `dateIso` para `proId`. Solo toca bloqueos del propio
+ * profesional (los de `*` se gestionan desde la lista, con confirmación):
+ * - si el bloqueo cubría solo ese día → se elimina;
+ * - si cubría un rango → se parte, conservando el resto.
+ */
+export function freeDay(
+  proId: string,
+  dateIso: string,
+): { ok: true; undo: DayOpUndo; stillBlocked: boolean } | { ok: false; error: string } {
+  const scope = String(proId ?? "").trim();
+  if (!scope || scope === "*") return { ok: false, error: "Elige un profesional para liberar el día." };
+  if (!isIso(dateIso)) return { ok: false, error: "La fecha no es válida." };
+
+  const covering = exceptionsCovering(scope, dateIso).filter((e) => e.proId === scope);
+  if (covering.length === 0) {
+    const clinic = exceptionsCovering(scope, dateIso).filter((e) => e.proId === "*");
+    if (clinic.length > 0)
+      return { ok: false, error: "El bloqueo es de toda la clínica: gestiónalo en la lista de bloqueos." };
+    return { ok: false, error: "Ese día no está bloqueado." };
+  }
+
+  const db = getDb();
+  const before: ExceptionView[] = [];
+  const created: number[] = [];
+  const now = Date.now();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    for (const e of covering) {
+      before.push(e);
+      const left = e.dateFrom < dateIso ? { from: e.dateFrom, to: shiftIso(dateIso, -1) } : null;
+      const right = e.dateTo > dateIso ? { from: shiftIso(dateIso, 1), to: e.dateTo } : null;
+      if (left && right) {
+        db.prepare("UPDATE date_exceptions SET date_to = ?, updated_at = ? WHERE id = ?").run(left.to, now, e.id);
+        const ins = db
+          .prepare(
+            `INSERT INTO date_exceptions (pro_id, date_from, date_to, kind, note, active, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(e.proId, right.from, right.to, e.kind, e.note, e.active ? 1 : 0, now, now);
+        created.push(Number(ins.lastInsertRowid));
+      } else if (left) {
+        db.prepare("UPDATE date_exceptions SET date_to = ?, updated_at = ? WHERE id = ?").run(left.to, now, e.id);
+      } else if (right) {
+        db.prepare("UPDATE date_exceptions SET date_from = ?, updated_at = ? WHERE id = ?").run(right.from, now, e.id);
+      } else {
+        db.prepare("DELETE FROM date_exceptions WHERE id = ?").run(e.id);
+      }
+    }
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    return { ok: false, error: err instanceof Error ? err.message : "No se pudo liberar el día." };
+  }
+  return {
+    ok: true,
+    undo: { dayIso: dateIso, proId: scope, before, created },
+    // Puede quedar bloqueado por un bloqueo de toda la clínica (`*`).
+    stillBlocked: exceptionsCovering(scope, dateIso).length > 0,
+  };
+}
+
+/** Revierte una operación de día (`blockDay` / `freeDay`). Idempotente con aviso. */
+export function undoDayOp(undo: DayOpUndo): { ok: true } | { ok: false; error: string } {
+  if (!undo || !isIso(undo.dayIso) || !Array.isArray(undo.before) || !Array.isArray(undo.created))
+    return { ok: false, error: "No hay nada que deshacer." };
+  const db = getDb();
+  const now = Date.now();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    for (const id of undo.created) db.prepare("DELETE FROM date_exceptions WHERE id = ?").run(id);
+    for (const e of undo.before) {
+      const exists = db.prepare("SELECT 1 FROM date_exceptions WHERE id = ?").get(e.id);
+      if (exists) {
+        db.prepare(
+          `UPDATE date_exceptions SET pro_id = ?, date_from = ?, date_to = ?, kind = ?, note = ?, active = ?, updated_at = ?
+           WHERE id = ?`,
+        ).run(e.proId, e.dateFrom, e.dateTo, e.kind, e.note, e.active ? 1 : 0, now, e.id);
+      } else {
+        db.prepare(
+          `INSERT INTO date_exceptions (id, pro_id, date_from, date_to, kind, note, active, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(e.id, e.proId, e.dateFrom, e.dateTo, e.kind, e.note, e.active ? 1 : 0, now, now);
+      }
+    }
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    return { ok: false, error: err instanceof Error ? err.message : "No se pudo deshacer." };
+  }
+  return { ok: true };
+}
+
+// ------------------------------------------------------------
 // Vista anual del panel (R4-B-3, D-R4-B-7): carga por día del año.
 // Se calcula con 2 consultas (citas + excepciones del año), NO con 365
 // llamadas a `daySlotsFor`. Los días futuros pasados de la ventana de

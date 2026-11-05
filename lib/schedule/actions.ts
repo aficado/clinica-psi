@@ -24,17 +24,22 @@ import { getProfessionals } from "@/lib/professionals";
 import { getServices, type ServiceView } from "@/lib/content";
 import { isoLocal } from "@/lib/schedule";
 import {
+  blockDay,
   cancelAppointment,
   createAppointment,
   deleteException,
   deleteRule,
   daySlotsFor,
+  exceptionsCovering,
+  freeDay,
   listExceptions,
   monthSchedule,
   rescheduleAppointment,
   saveException,
   saveRule,
+  undoDayOp,
   type BookingInput,
+  type DayOpUndo,
   type DaySlotsWithReason,
   type ExceptionInput,
   type ExceptionView,
@@ -229,6 +234,67 @@ export async function deleteDateException(id: number): Promise<{ ok: true } | { 
   const res = deleteException(id);
   if (res.ok) {
     logAudit(guard.actor, "excepcion.borrar", "date_exception", String(id));
+    revalidatePath("/admin/horarios");
+  }
+  return res;
+}
+
+// ------------------------------------------------------------
+// Operaciones POR DÍA (R4-B-UX-1): clic en el calendario → bloquear/liberar
+// ese día exacto, con `DayOpUndo` para poder deshacer.
+
+type DayBlocksResult =
+  | { ok: true; blocks: ExceptionView[] }
+  | { ok: false; error: string };
+
+type DayOpResult = { ok: true; undo: DayOpUndo } | { ok: false; error: string };
+type FreeDayResult =
+  | { ok: true; undo: DayOpUndo; stillBlocked: boolean }
+  | { ok: false; error: string };
+
+/** Qué bloqueos cubren un día (incluye inactivos, para mostrarlos en el panel). */
+export async function fetchDayBlocks(proId: string, dateIso: string): Promise<DayBlocksResult> {
+  const guard = await guardSchedule();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  return { ok: true, blocks: exceptionsCovering(proId, dateIso, { includeInactive: true }) };
+}
+
+/** Bloquea exactamente un día (PB-1). */
+export async function blockDayAction(
+  proId: string,
+  dateIso: string,
+  kind: string,
+  note: string,
+): Promise<DayOpResult> {
+  const guard = await guardSchedule();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  const res = blockDay(proId, dateIso, kind, note);
+  if (res.ok) {
+    logAudit(guard.actor, "excepcion.bloquear-dia", "date_exception", `${proId}:${dateIso}`, `tipo=${kind}`);
+    revalidatePath("/admin/horarios");
+  }
+  return res;
+}
+
+/** Libera exactamente un día, partiendo el rango si hacía falta (PB-2). */
+export async function freeDayAction(proId: string, dateIso: string): Promise<FreeDayResult> {
+  const guard = await guardSchedule();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  const res = freeDay(proId, dateIso);
+  if (res.ok) {
+    logAudit(guard.actor, "excepcion.liberar-dia", "date_exception", `${proId}:${dateIso}`);
+    revalidatePath("/admin/horarios");
+  }
+  return res;
+}
+
+/** Deshace la operación de día con el inverso que devolvió (PB-4). */
+export async function undoDayAction(undo: DayOpUndo): Promise<{ ok: true } | { ok: false; error: string }> {
+  const guard = await guardSchedule();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  const res = undoDayOp(undo);
+  if (res.ok) {
+    logAudit(guard.actor, "excepcion.deshacer", "date_exception", `${undo.proId}:${undo.dayIso}`);
     revalidatePath("/admin/horarios");
   }
   return res;

@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { getSessionProfile } from "@/lib/admin/session";
 import { canManageSchedule } from "@/lib/rbac";
 import { getProfessionals } from "@/lib/professionals";
+import { getServices } from "@/lib/content";
 import { getRules, listAppointments, listExceptions, yearSchedule } from "@/lib/schedule";
 import { Icon } from "@/components/ui";
 import { ScheduleManager } from "@/components/admin/ScheduleManager";
@@ -60,6 +61,15 @@ export default async function HorariosPage({
   const proId = pros.some((p) => p.id === proArg) ? proArg : (pros[0]?.id ?? "");
   const initialTab = sp.tab === "calendario" || sp.tab === "horarios" ? sp.tab : "agenda";
 
+  // PB-3 (R4-B-UX-1): enlace de previsualización "cómo lo ve el paciente" por
+  // profesional — usa el primer servicio que atiende, con su primera modalidad.
+  const services = getServices();
+  const previews: Record<string, string> = {};
+  for (const p of pros) {
+    const svc = services.find((s) => p.services.includes(s.slug) && s.modalities.length > 0);
+    if (svc) previews[p.id] = `/agendar?service=${svc.slug}&mode=${svc.modalities[0]}&pro=${p.id}`;
+  }
+
   return (
     <div className="mx-auto w-full max-w-5xl">
       <div className="mb-8">
@@ -78,6 +88,7 @@ export default async function HorariosPage({
         proId={proId}
         yearDays={proId ? yearSchedule(proId, year) : []}
         exceptions={listExceptions()}
+        previews={previews}
       />
     </div>
   );

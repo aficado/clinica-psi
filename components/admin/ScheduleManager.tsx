@@ -6,16 +6,21 @@ import { useRouter } from "next/navigation";
 import type { Professional } from "@/lib/data";
 import type {
   AppointmentView,
+  DayOpUndo,
   ExceptionView,
   RuleView,
   YearDay,
 } from "@/lib/schedule";
 import {
   adminCancelAppointment,
+  blockDayAction,
   deleteAvailabilityRule,
   deleteDateException,
+  fetchDayBlocks,
+  freeDayAction,
   saveAvailabilityRule,
   saveDateException,
+  undoDayAction,
 } from "@/lib/schedule/actions";
 import { cn, formatDateLongMX, timeLabel } from "@/lib/utils";
 import { Button, Card, Icon, TodoChip } from "@/components/ui";
@@ -57,6 +62,7 @@ export function ScheduleManager({
   proId,
   yearDays,
   exceptions,
+  previews = {},
 }: {
   rules: RuleView[];
   appointments: AppointmentView[];
@@ -66,6 +72,8 @@ export function ScheduleManager({
   proId: string;
   yearDays: YearDay[];
   exceptions: ExceptionView[];
+  /** PB-3: URL base de `/agendar` por profesional, para "ver cómo lo ve el paciente". */
+  previews?: Record<string, string>;
 }) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>(initialTab);
@@ -81,6 +89,19 @@ export function ScheduleManager({
     kind: string;
     note: string;
   }>({ proId: "*", dateFrom: "", dateTo: "", kind: "vacaciones", note: "" });
+
+  // ---- R4-B-UX-1: bloqueo por clic en el día ------------------------------
+  const [dayPanel, setDayPanel] = useState<{ iso: string; top: number; left: number } | null>(null);
+  const [dayBlocks, setDayBlocks] = useState<ExceptionView[] | null>(null);
+  const [dayKind, setDayKind] = useState("festivo");
+  const [dayNote, setDayNote] = useState("");
+  const [dayAllClinic, setDayAllClinic] = useState(false);
+  const [panelBusy, setPanelBusy] = useState(false);
+  /** Repintado inmediato del día sin esperar el re-render del servidor. */
+  const [override, setOverride] = useState<Record<string, "cerrado" | "abierto">>({});
+  /** Pila de operaciones deshacibles (PB-4) — vive en esta sesión de página. */
+  const [undoStack, setUndoStack] = useState<{ undo: DayOpUndo; label: string }[]>([]);
+  const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string; preview?: string } | null>(null);
 
   const now = Date.now();
   const upcoming = appointments.filter((a) => a.status === "confirmada" && a.startMs >= now);
@@ -222,6 +243,96 @@ export function ScheduleManager({
     setBusy(false);
     setMsg(res.ok ? { kind: "ok", text: "Bloqueo eliminado." } : { kind: "err", text: res.error });
     if (res.ok) router.refresh();
+  }
+
+  // ---- handlers del panel por día (R4-B-UX-1) -----------------------------
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const previewHref = (iso: string) => {
+    const base = previews[proId];
+    return base ? `${base}&dia=${iso}` : `/agendar?dia=${iso}`;
+  };
+
+  async function openDayPanel(iso: string, el: HTMLElement) {
+    const r = el.getBoundingClientRect();
+    const left = Math.min(Math.max(12, r.left - 10), Math.max(12, window.innerWidth - 356));
+    const flipUp = r.bottom + 300 > window.innerHeight;
+    setDayPanel({ iso, top: flipUp ? Math.max(12, r.top - 300) : r.bottom + 8, left });
+    setDayBlocks(null);
+    setDayNote("");
+    setDayAllClinic(false);
+    const res = await fetchDayBlocks(proId, iso);
+    setDayBlocks(res.ok ? res.blocks : []);
+    if (!res.ok) setBanner({ kind: "err", text: res.error });
+  }
+
+  function closeDayPanel() {
+    setDayPanel(null);
+    setDayBlocks(null);
+  }
+
+  async function doBlockDay() {
+    if (!dayPanel) return;
+    setPanelBusy(true);
+    const res = await blockDayAction(dayAllClinic ? "*" : proId, dayPanel.iso, dayKind, dayNote);
+    setPanelBusy(false);
+    if (!res.ok) {
+      setBanner({ kind: "err", text: res.error });
+      return;
+    }
+    const label = formatDateLongMX(dayPanel.iso);
+    setOverride((o) => ({ ...o, [dayPanel.iso]: "cerrado" }));
+    setUndoStack((s) => [...s.slice(-19), { undo: res.undo, label: `Bloqueo de ${label}` }]);
+    setBanner({
+      kind: "ok",
+      text: `Día bloqueado: ${label} · ${KIND_LABEL[dayKind]}${dayAllClinic ? " (toda la clínica)" : ` · ${proName(proId)}`}`,
+      preview: previewHref(dayPanel.iso),
+    });
+    closeDayPanel();
+    router.refresh();
+  }
+
+  async function doFreeDay(blockProId: string) {
+    if (!dayPanel) return;
+    setPanelBusy(true);
+    const res = await freeDayAction(blockProId, dayPanel.iso);
+    setPanelBusy(false);
+    if (!res.ok) {
+      setBanner({ kind: "err", text: res.error });
+      return;
+    }
+    const label = formatDateLongMX(dayPanel.iso);
+    setOverride((o) => ({ ...o, [dayPanel.iso]: res.stillBlocked ? "cerrado" : "abierto" }));
+    setUndoStack((s) => [...s.slice(-19), { undo: res.undo, label: `Liberar ${label}` }]);
+    setBanner({
+      kind: "ok",
+      text: res.stillBlocked
+        ? `Liberado el bloqueo de ${label}, pero el día sigue bloqueado por un bloqueo de toda la clínica.`
+        : `Día liberado: ${label}. Si era un rango, el resto de los días sigue bloqueado.`,
+      preview: previewHref(dayPanel.iso),
+    });
+    closeDayPanel();
+    router.refresh();
+  }
+
+  async function doUndo() {
+    const last = undoStack[undoStack.length - 1];
+    if (!last) return;
+    setPanelBusy(true);
+    const res = await undoDayAction(last.undo);
+    setPanelBusy(false);
+    if (!res.ok) {
+      setBanner({ kind: "err", text: res.error });
+      return;
+    }
+    setUndoStack((s) => s.slice(0, -1));
+    setOverride((o) => {
+      const n = { ...o };
+      delete n[last.undo.dayIso];
+      return n;
+    });
+    setBanner({ kind: "ok", text: `Deshecho: ${last.label}.` });
+    closeDayPanel();
+    router.refresh();
   }
 
   return (
@@ -541,35 +652,48 @@ export function ScheduleManager({
                         <span key={`pad-${k}`} aria-hidden="true" />
                       ))}
                       {days.map((d) => {
+                        // PB-1: cada día es un botón — clic = bloquear/liberar ese día exacto.
+                        const ov = override[d.dateIso];
+                        const blocked = ov ? ov === "cerrado" : d.reason === "cerrado";
+                        const state = blocked
+                          ? "cerrado"
+                          : ov === "abierto"
+                            ? null
+                            : d.reason;
                         const style =
-                          d.reason === "cerrado"
+                          state === "cerrado"
                             ? "bg-terracotta/50 text-white"
-                            : d.reason === "no_atiende"
+                            : state === "no_atiende"
                               ? "bg-mist text-ink-soft/60 ring-1 ring-ink/10"
-                              : d.reason === "sin_cupo"
+                              : state === "sin_cupo"
                                 ? "bg-sand text-ink-soft"
                                 : d.free <= 2
                                   ? "bg-sage/20 text-sage-dark"
                                   : "bg-sage/60 text-white";
-                        const title =
-                          d.reason === "cerrado"
-                            ? `Bloqueado (${d.blocked ?? "sin motivo"}) — ${d.taken} cita(s) ese día`
-                            : d.reason === "no_atiende"
-                              ? "No atiende"
-                              : d.reason === "sin_cupo"
-                                ? "Sin cupo"
-                                : `${d.free} libres · ${d.taken} cit${d.taken === 1 ? "a" : "as"}`;
+                        const title = blocked
+                          ? `Bloqueado — clic para liberarlo`
+                          : state === "no_atiende"
+                            ? "No atiende — clic para bloquear igualmente"
+                            : state === "sin_cupo"
+                              ? "Sin cupo — clic para bloquear"
+                              : `${d.free} libres · ${d.taken} cita(s) — clic para bloquear`;
+                        const isToday = d.dateIso === todayIso;
                         return (
-                          <span
+                          <button
                             key={d.dateIso}
+                            type="button"
+                            onClick={(ev) => openDayPanel(d.dateIso, ev.currentTarget)}
+                            aria-label={`${formatDateLongMX(d.dateIso)} · ${proName(proId)} · ${title}`}
+                            aria-pressed={blocked}
                             title={`${d.dateIso} · ${title}`}
                             className={cn(
-                              "flex aspect-square items-center justify-center rounded-sm text-[11px] font-semibold",
+                              "flex aspect-square items-center justify-center rounded-sm text-[11px] font-semibold transition-colors hover:ring-2 hover:ring-ink/30 focus-visible:ring-2 focus-visible:ring-sage-dark",
                               style,
+                              isToday && "outline outline-2 outline-offset-1 outline-ink/50",
                             )}
                           >
                             {Number(d.dateIso.slice(8, 10))}
-                          </span>
+                          </button>
                         );
                       })}
                     </div>
@@ -579,12 +703,177 @@ export function ScheduleManager({
             </div>
           </Card>
 
+          {/* PB-3/PB-4: confirmación con "Deshacer" y previsualización del lado del paciente */}
+          {banner ? (
+            <div
+              role="status"
+              className={cn(
+                "mt-4 flex flex-wrap items-center gap-3 rounded-(--radius-card) border px-4 py-3 text-sm font-medium",
+                banner.kind === "ok"
+                  ? "border-sage/40 bg-sage/15 text-sage-dark"
+                  : "border-terracotta/40 bg-terracotta/15 text-terracotta-dark",
+              )}
+            >
+              <span>{banner.text}</span>
+              {undoStack.length > 0 ? (
+                <Button variant="ghost" onClick={doUndo} disabled={panelBusy}>
+                  Deshacer ({undoStack.length})
+                </Button>
+              ) : null}
+              {banner.kind === "ok" && banner.preview ? (
+                <a
+                  href={banner.preview}
+                  target="_blank"
+                  rel="noopener"
+                  className="font-semibold underline underline-offset-2"
+                >
+                  Ver cómo lo ve el paciente ↗
+                </a>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setBanner(null)}
+                aria-label="Cerrar el aviso"
+                className="ml-auto min-h-11 min-w-11 text-ink-soft hover:text-ink"
+              >
+                ×
+              </button>
+            </div>
+          ) : null}
+
+          {/* PB-1/PB-2: panel del día, anclado junto a la casilla clicada */}
+          {dayPanel ? (
+            <>
+              <div className="fixed inset-0 z-40" aria-hidden="true" onClick={closeDayPanel} />
+              <div
+                role="dialog"
+                aria-label={`Día ${formatDateLongMX(dayPanel.iso)}`}
+                tabIndex={-1}
+                onKeyDown={(ev) => {
+                  if (ev.key === "Escape") closeDayPanel();
+                }}
+                ref={(el) => {
+                  if (el) el.focus({ preventScroll: true });
+                }}
+                style={{ top: dayPanel.top, left: dayPanel.left }}
+                className="fixed z-50 w-80 rounded-(--radius-card) border border-ink/15 bg-white p-4 shadow-[0_12px_32px_rgba(31,42,39,0.18)]"
+              >
+                <div className="flex items-start gap-2">
+                  <div>
+                    <p className="text-sm font-semibold capitalize">{formatDateLongMX(dayPanel.iso)}</p>
+                    <p className="text-xs text-ink-soft">{proName(proId)}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeDayPanel}
+                    aria-label="Cerrar sin bloquear"
+                    className="ml-auto min-h-11 min-w-11 text-ink-soft hover:text-ink"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                {dayBlocks === null ? (
+                  <p className="mt-3 text-sm text-ink-soft">Consultando el día…</p>
+                ) : dayBlocks.filter((e) => e.active).length > 0 ? (
+                  <div className="mt-3 space-y-3">
+                    {dayBlocks
+                      .filter((e) => e.active)
+                      .map((e) => (
+                        <div key={e.id} className="rounded-(--radius-btn) border border-terracotta/40 bg-terracotta/10 p-3 text-sm">
+                          <p className="font-semibold text-terracotta-dark">
+                            {KIND_LABEL[e.kind] ?? e.kind} · {proName(e.proId)}
+                          </p>
+                          {e.dateFrom !== e.dateTo ? (
+                            <p className="mt-0.5 text-xs text-ink-soft">
+                              rango {e.dateFrom} → {e.dateTo}
+                            </p>
+                          ) : null}
+                          {e.note ? <p className="mt-0.5 text-xs">“{e.note}”</p> : null}
+                          <div className="mt-2">
+                            {e.proId === proId ? (
+                              <Button variant="primary" onClick={() => doFreeDay(e.proId)} disabled={panelBusy}>
+                                Liberar este día
+                              </Button>
+                            ) : (
+                              <p className="text-xs text-ink-soft">
+                                Es un bloqueo de toda la clínica: desactívalo o elimínalo en la lista
+                                de abajo.
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    {dayBlocks.some((e) => !e.active) ? (
+                      <p className="text-xs text-ink-soft">
+                        Hay {dayBlocks.filter((e) => !e.active).length} bloqueo(s) inactivo(s) que
+                        también cubren este día.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="mt-3 space-y-3">
+                    <p className="text-sm text-ink-soft">Este día no está bloqueado.</p>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Motivo</p>
+                      <div className="mt-1.5 flex flex-wrap gap-2" role="radiogroup" aria-label="Motivo del bloqueo">
+                        {(["festivo", "vacaciones", "bloqueo"] as const).map((k) => (
+                          <button
+                            key={k}
+                            type="button"
+                            role="radio"
+                            aria-checked={dayKind === k}
+                            onClick={() => setDayKind(k)}
+                            className={cn(
+                              "min-h-11 rounded-(--radius-btn) border-2 px-3 text-sm font-semibold",
+                              dayKind === k
+                                ? "border-terracotta bg-terracotta/15 text-terracotta-dark"
+                                : "border-ink/15 bg-white text-ink hover:border-terracotta/50",
+                            )}
+                          >
+                            {KIND_LABEL[k]}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <label className="block text-sm">
+                      <span className="font-semibold">Nota (opcional)</span>
+                      <input
+                        type="text"
+                        maxLength={200}
+                        value={dayNote}
+                        placeholder="p. ej. Día de Muertos"
+                        onChange={(ev) => setDayNote(ev.target.value)}
+                        className="mt-1 h-11 w-full rounded-(--radius-input) border border-ink/15 bg-white px-3"
+                      />
+                    </label>
+                    <label className="flex items-start gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={dayAllClinic}
+                        onChange={(ev) => setDayAllClinic(ev.target.checked)}
+                        className="mt-1 h-5 w-5 accent-sage"
+                      />
+                      <span>
+                        Bloquear para <strong>toda la clínica</strong> (ahora: solo {proName(proId)})
+                      </span>
+                    </label>
+                    <Button onClick={doBlockDay} disabled={panelBusy}>
+                      {panelBusy ? "Bloqueando…" : "Bloquear el día"}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : null}
+
           <Card className="p-6">
             <h2 className="text-xl">Bloqueos por fecha (vacaciones y festivos)</h2>
             <p className="mt-1.5 text-sm text-ink-soft">
-              Un bloqueo quita los horarios de un rango de fechas para un profesional (o para toda
-              la clínica) y <strong>no se puede reservar</strong> ni por el sitio ni directo por
-              enlace. Se crea al instante y se puede desactivar o eliminar.
+              Lo normal es bloquear <strong>haciendo clic en el día</strong> aquí arriba (y se puede
+              deshacer con un botón). Aquí abajo quedan todos los bloqueos registrados, para
+              desactivarlos o eliminarlos; y más abajo, el formulario para <strong>rangos largos</strong>
+              (vacaciones de varios días).
             </p>
 
             {exceptions.length === 0 ? (
@@ -622,7 +911,12 @@ export function ScheduleManager({
               </ul>
             )}
 
-            <div className="mt-6 flex flex-wrap items-end gap-3 border-t border-ink/10 pt-5">
+            {/* PB-5: el rango largo deja de ser el camino principal, sigue disponible */}
+            <details className="mt-6 border-t border-ink/10 pt-5">
+              <summary className="min-h-11 cursor-pointer text-sm font-semibold">
+                Añadir bloqueo por rango (vacaciones de varios días)
+              </summary>
+            <div className="mt-2 flex flex-wrap items-end gap-3">
               <label className="flex flex-col gap-1 text-sm">
                 <span className="font-medium">Profesional</span>
                 <select
@@ -680,9 +974,10 @@ export function ScheduleManager({
                 />
               </label>
               <Button onClick={addException} disabled={busy}>
-                Bloquear esos días
+                Bloquear el rango
               </Button>
             </div>
+            </details>
           </Card>
         </div>
       ) : null}

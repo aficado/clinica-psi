@@ -26,6 +26,8 @@ interface BookingInitial {
   service?: string;
   mode?: string;
   pro?: string;
+  /** R4-B-UX-1: enlace de previsualización del panel (`/agendar?...&dia=`) — abre el mes de ese día. */
+  dia?: string;
 }
 
 const STEPS = ["Servicio", "Modalidad", "Profesional", "Horario", "Tus datos"];
@@ -79,12 +81,15 @@ export function BookingFlow({
   professionals: Professional[];
 }) {
   const init = normalizeInitial(initial.service, initial.mode, initial.pro, services, professionals);
+  // Vista previa desde el panel: si llega `dia` válido, el calendario abre en ESE mes y la
+  // cookie de la sesión previa NO pisa la navegación (si no, el admin vería otro mes).
+  const previewIso = ISO_DATE_RE.test(initial.dia ?? "") ? (initial.dia as string) : null;
 
   const [step, setStep] = useState(init.step);
   const [serviceSlug, setServiceSlug] = useState<string | null>(init.service);
   const [modality, setModality] = useState<"presencial" | "enlinea" | null>(init.mode);
   const [proId, setProId] = useState<string | null>(init.pro);
-  const [dateIso, setDateIso] = useState<string | null>(null);
+  const [dateIso, setDateIso] = useState<string | null>(previewIso);
   const [hour, setHour] = useState<number | null>(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -98,7 +103,10 @@ export function BookingFlow({
 
   // La disponibilidad la maneja `CalendarView` (mes completo al elegir el profesional); aquí solo se
   // mantiene el mes visible para restaurarlo desde la cookie. D-R4-B-1: cualquier día es seleccionable.
-  const [monthIso, setMonthIso] = useState<string>(() => localIso(new Date()).slice(0, 7));
+  // Mes visible: si viene `?dia=` (preview del panel) se abre en ese mes, no en el de hoy.
+  const [monthIso, setMonthIso] = useState<string>(() =>
+    previewIso ? previewIso.slice(0, 7) : localIso(new Date()).slice(0, 7),
+  );
 
   const service = serviceSlug ? services.find((s) => s.slug === serviceSlug) ?? null : null;
   const pro = proId ? professionals.find((p) => p.id === proId) ?? null : null;
@@ -175,6 +183,8 @@ export function BookingFlow({
   }
 
   useEffect(() => {
+    // Con `?dia=` (previsualización del panel) mandan los parámetros de la URL.
+    if (previewIso) return;
     const saved = cookieState();
     if (Object.keys(saved).length === 0) return;
     if (typeof saved.serviceSlug === "string") setServiceSlug(saved.serviceSlug);

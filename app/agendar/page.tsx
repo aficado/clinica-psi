@@ -22,6 +22,7 @@ export default async function AgendarPage({
   const service = asString(params.service);
   const mode = asString(params.mode);
   const pro = asString(params.pro);
+  const dia = asString(params.dia);
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-10 sm:px-6">
@@ -48,6 +49,7 @@ export default async function AgendarPage({
               service: service && service !== "" ? service : undefined,
               mode: mode && mode !== "" ? mode : undefined,
               pro: pro && pro !== "" ? pro : undefined,
+              dia: /^\d{4}-\d{2}-\d{2}$/.test(dia ?? "") ? dia : undefined,
             }}
             services={getServices()}
             professionals={getProfessionals()}
