@@ -13,6 +13,8 @@ const log = [];
 const line = (s) => { log.push(s); console.log(s); };
 
 const apptIdsAntes = new Set(db.prepare("SELECT id FROM appointments").all().map((r) => r.id));
+// Ventana que encontró la suite (el valor de la dueña): se restaura al final.
+const VENTANA_ANTES = db.prepare("SELECT booking_window_days d FROM site_settings WHERE id='current'").get().d;
 
 try {
   try {
@@ -237,18 +239,18 @@ try {
   // --- 3. restaurar ventana y limpiar la cita de prueba ---------------------
   await ad.page.goto(`${base}/admin/ajustes`, { waitUntil: "networkidle0" });
   await sleep(1200);
-  await ad.js(() => {
+  await ad.js((v) => {
     const nums = [...document.querySelectorAll('input[type="number"]')];
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(nums[1], "365");
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(nums[1], String(v));
     nums[1].dispatchEvent(new Event("input", { bubbles: true }));
-  });
+  }, VENTANA_ANTES);
   await ad.clickBtn("Guardar ajustes");
   await sleep(2200);
   const w2 = db.prepare("SELECT booking_window_days d FROM site_settings WHERE id='current'").get().d;
   const nuevos = db.prepare("SELECT id, token FROM appointments").all().filter((r) => !apptIdsAntes.has(r.id));
   for (const r of nuevos) db.prepare("DELETE FROM appointments WHERE id = ?").run(r.id);
-  line(`10) ventana restaurada=${w2} (esperado 365); citas de prueba borradas=${nuevos.length}`);
-  if (w2 !== 365 || nuevos.length !== 1) fails++;
+  line(`10) ventana restaurada=${w2} (esperado ${VENTANA_ANTES}, la que encontró la suite); citas de prueba borradas=${nuevos.length}`);
+  if (w2 !== VENTANA_ANTES || nuevos.length !== 1) fails++;
   await ad.ctx.close();
 
   line(`\nRESULTADO: ${fails === 0 ? "✔ TODAS las verificaciones del hotfix pasaron" : "✘ " + fails + " fallaron"}`);

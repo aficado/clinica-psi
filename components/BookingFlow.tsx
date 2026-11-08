@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { clinic } from "@/lib/data";
 import type { Professional, Service } from "@/lib/data";
 import { professionalsFor } from "@/lib/slots";
-import { bookAppointment } from "@/lib/schedule/actions";
+import { bookAppointment, fetchDaySlots } from "@/lib/schedule/actions";
 import { cn, formatDateLongMX, timeLabel, waLink } from "@/lib/utils";
 import { setBookingState, getBookingState, clearBookingState } from "@/lib/cookies";
 import { Button, Card, Icon, TodoChip } from "./ui";
@@ -227,7 +227,8 @@ export function BookingFlow({
     setProId((saved.proId as string | null) ?? null);
     setDateIso((saved.dateIso as string | null) ?? null);
     setHour((saved.hour as number | null) ?? null);
-    if (typeof saved.monthIso === "string") setMonthIso(saved.monthIso);
+    // H2-1 (R4-B-HOTFIX-2): NO se restaura el mes visto: el calendario abre en el
+    // primer mes que la ventana permite (el motor lo decide, no una cookie vieja).
     if (typeof saved.step === "number") setStep(saved.step);
     // Re-normalizar la cookie: nada de lo invalidado sobrevive (R4-B).
     setBookingState({
@@ -241,6 +242,42 @@ export function BookingFlow({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /**
+   * H2-2 (R4-B-HOTFIX-2): la primera fecha que aparece seleccionada al montar
+   * (típicamente la restaurada de la cookie) se RE-VALIDA contra la
+   * disponibilidad real de hoy: la ventana de reserva pudo haberse acortado
+   * desde que se guardó, el admin pudo bloquear el día u otro paciente ocupar
+   * la hora. Si el día ya no ofrece cupo se descarta día+hora y el paso
+   * retrocede a "¿Cuándo?" (el calendario se re-atraca solo); si solo la hora
+   * elegida fue ocupada, se quita la hora y se conserva el día. Con `?dia=`
+   * (previsualización del panel) NO se valida: se muestra tal cual.
+   */
+  const revalidatedRef = useRef(false);
+  useEffect(() => {
+    if (revalidatedRef.current || previewIso || !proId || !dateIso) return;
+    revalidatedRef.current = true;
+    const d = dateIso;
+    const p = proId;
+    const h = hour;
+    fetchDaySlots(d, p)
+      .then((res) => {
+        const day = res.ok ? res.days[0] : null;
+        if (!day || day.freeCount === 0) {
+          setDateIso(null);
+          setHour(null);
+          setStep((s) => (s >= 4 ? 3 : s));
+          writeState({ dateIso: null, hour: null });
+        } else if (h !== null && !day.hours.some((x) => x.hour === h && !x.taken)) {
+          setHour(null);
+          writeState({ hour: null });
+        }
+      })
+      .catch(() => {
+        revalidatedRef.current = false; // sin respuesta: no descartar nada a ciegas
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proId, dateIso]);
 
   /** Mes visible al elegir el profesional (usado por `CalendarView`). */
   function monthFor(iso: string | null): string {
@@ -540,6 +577,8 @@ export function BookingFlow({
                 proId={pro.id}
                 dateIso={dateIso}
                 hour={hour}
+                initialMonth={monthIso}
+                disableAnchor={!!previewIso}
                 onSelect={pickDateAndHour}
                 onNavigate={(m) => setMonthIso(m)}
               />

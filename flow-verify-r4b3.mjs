@@ -65,6 +65,10 @@ try {
   };
 
   const db = new DatabaseSync(dbPath);
+  // Ajustes que encontró la suite: se restauran al final (NO pisar los de la dueña).
+  const ANTES = db
+    .prepare("SELECT cancel_cutoff_hours h, booking_window_days w, time_zone z FROM site_settings WHERE id='current'")
+    .get();
 
   // --- 0. login admin ------------------------------------------------------
   const admin = await newPage();
@@ -248,7 +252,7 @@ try {
 
   await admin.page.goto(`${base}/admin/ajustes`, { waitUntil: "networkidle0" });
   await sleep(1200);
-  await admin.js(() => {
+  await admin.js((a) => {
     const nums = [...document.querySelectorAll('input[type="number"]')];
     const sel = document.querySelector("select");
     const setNative = (el, val) => {
@@ -257,18 +261,18 @@ try {
       el.dispatchEvent(new Event("input", { bubbles: true }));
       el.dispatchEvent(new Event("change", { bubbles: true }));
     };
-    setNative(nums[0], 24);
-    setNative(nums[1], 365);
-    setNative(sel, "America/Mexico_City");
-  });
+    setNative(nums[0], a.h);
+    setNative(nums[1], a.w);
+    setNative(sel, a.z);
+  }, ANTES);
   await sleep(300);
   await admin.clickBtn("Guardar ajustes");
   await sleep(2500);
   const srow2 = db
     .prepare("SELECT cancel_cutoff_hours h, booking_window_days w, time_zone z FROM site_settings WHERE id='current'")
     .get();
-  line(`5b) ajustes restaurados en BD: cutoff=${srow2.h} ventana=${srow2.w} zona=${srow2.z}`);
-  if (srow2.w !== 365 || srow2.h !== 24 || srow2.z !== "America/Mexico_City") fails++;
+  line(`5b) ajustes restaurados en BD: cutoff=${srow2.h} ventana=${srow2.w} zona=${srow2.z} (encontrados: ${ANTES.h}/${ANTES.w}/${ANTES.z})`);
+  if (srow2.w !== ANTES.w || srow2.h !== ANTES.h || srow2.z !== ANTES.z) fails++;
 
   // 5c) el día vuelve a tener cupo (otra persona, contexto limpio)
   const v4 = await openAgendar();

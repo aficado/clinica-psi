@@ -46,6 +46,9 @@ export interface DaySlotsWithReason extends DaySlots {
   blockedLabel?: string;
   /** HF-1: último día agendable cuando `reason === "fuera_de_ventana"` (para el aviso legible). */
   windowEndIso?: string;
+  /** H2-1 (R4-B-HOTFIX-2): primer día agendable de la ventana — permite al calendario
+   *  "aterrizar" en el primer mes permitido cuando se aterrizó en un mes posterior. */
+  windowStartIso?: string;
 }
 
 export type ApptStatus = "confirmada" | "cancelada" | "completada";
@@ -276,6 +279,7 @@ export function daySlotsFor(dateIso: string, proId: string): DaySlotsWithReason 
       hours: [],
       reason: "fuera_de_ventana",
       freeCount: 0,
+      windowStartIso: win.min,
       windowEndIso: win.max,
     };
   }

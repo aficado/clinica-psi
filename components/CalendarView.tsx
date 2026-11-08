@@ -13,7 +13,7 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon, Card } from "./ui";
 import type { DaySlotsWithReason } from "@/lib/schedule";
@@ -29,6 +29,8 @@ export function CalendarView({
   proId,
   dateIso,
   hour,
+  initialMonth,
+  disableAnchor,
   onSelect,
   onNavigate,
 }: {
@@ -37,15 +39,23 @@ export function CalendarView({
   dateIso?: string | null;
   /** Hora actualmente seleccionada. */
   hour?: number | null;
+  /** H2-1: mes con el que abre el calendario (lo decide el padre; si no viene, el del día elegido o el de hoy). */
+  initialMonth?: string;
+  /** H2-1: previsualización del panel (`?dia=`): el anclaje NO debe mover la vista. */
+  disableAnchor?: boolean;
   /** Cuando elige día/hora: (dateIso, hour) */
   onSelect: (dateIso: string, hour: number) => void;
   /** Cuando navega de mes: (mesIso `YYYY-MM`) */
   onNavigate: (monthIso: string) => void;
 }) {
-  // Mes visible, SIEMPRE `YYYY-MM`: si hay día elegido se parte de su mes; si
-  // no, del mes actual — construido con los campos LOCALES (no UTC).
-  const [month, setMonth] = useState(() => (dateIso ? dateIso.slice(0, 7) : isoToday().slice(0, 7)));
+  // Mes visible, SIEMPRE `YYYY-MM`: el que manda el padre; si no, el del día
+  // elegido; si tampoco hay, el actual — construido con campos LOCALES (no UTC).
+  const [month, setMonth] = useState(
+    () => initialMonth ?? (dateIso ? dateIso.slice(0, 7) : isoToday().slice(0, 7)),
+  );
   const [slots, setSlots] = useState<DaySlotsWithReason[] | null>(null);
+  /** Mes al que pertenecen los `slots` cargados: evita que el anclaje decida con datos de otro mes. */
+  const [slotsMonth, setSlotsMonth] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,8 +73,10 @@ export function CalendarView({
       try {
         const res = await fetchMonthSchedule(proId, month);
         if (cancelled) return;
-        if (res.ok) setSlots(res.days);
-        else setError(res.error);
+        if (res.ok) {
+          setSlots(res.days);
+          setSlotsMonth(month);
+        } else setError(res.error);
       } catch {
         if (!cancelled) setError("No pudimos consultar la disponibilidad.");
       } finally {
@@ -76,6 +88,88 @@ export function CalendarView({
       cancelled = true;
     };
   }, [month, proId]);
+
+  /**
+   * H2-1 (R4-B-HOTFIX-2): el calendario ATRACIZA en el primer mes que la
+   * ventana permite reservar con cupo real. Si el mes cargado no tiene ni un
+   * horario libre se mueve solo: si quedó DESPUÉS del límite de la ventana
+   * (p. ej. una vista guardada cuando la ventana era mayor), retrocede al mes
+   * de inicio; si quedó ANTES o el profesional no atiende, avanza un mes.
+   * Se detiene al encontrar cupo, al agotar la ventana, o en cuanto el
+   * usuario toca la navegación.
+   */
+  const [anchorPending, setAnchorPending] = useState(true);
+  const anchorSteps = useRef(0);
+  const firstProRun = useRef(true);
+  useEffect(() => {
+    if (disableAnchor) return;
+    // Cambiar de profesional re-ancla (el nuevo puede no atender este mes).
+    if (firstProRun.current) {
+      firstProRun.current = false;
+      return;
+    }
+    anchorSteps.current = 0;
+    setAnchorPending(true);
+  }, [proId, disableAnchor]);
+
+  useEffect(() => {
+    // H2-1: escanea incluso con un día restaurado de serie: el mes visible lo
+    // coloca el padre (mes de hoy), y aquí solo se avanza si ese mes no tiene
+    // ni un horario dentro de la ventana.
+    if (disableAnchor || !anchorPending || loading || !slots) return;
+    // Solo decide con los días del mes que está a la vista (si no, al saltar de mes
+    // vería el mes anterior y saltaría dos veces: Nov → Dic → Ene).
+    if (slotsMonth !== month) return;
+    const todayS = isoToday();
+    if (slots.some((d) => d.freeCount > 0 && d.dateIso >= todayS)) {
+      setAnchorPending(false);
+      return;
+    }
+    const startM = slots.find((d) => d.windowStartIso)?.windowStartIso?.slice(0, 7) ?? null;
+    const endM = slots.find((d) => d.windowEndIso)?.windowEndIso?.slice(0, 7) ?? null;
+    if (anchorSteps.current >= 13) {
+      setAnchorPending(false);
+      return;
+    }
+    anchorSteps.current += 1;
+    if (!slots.length) {
+      // Mes sin datos (antes del mes actual): al mes de hoy.
+      jump(isoToday().slice(0, 7));
+      return;
+    }
+    if (startM && month < startM) {
+      jump(startM);
+      return;
+    }
+    if (endM && month > endM) {
+      // Vista vieja posterior al límite: aterriza en el primer mes permitido.
+      anchorSteps.current = 0;
+      jump(startM ?? isoToday().slice(0, 7));
+      return;
+    }
+    if (endM && month >= endM) {
+      // Ventana agotada sin cupo en ningún mes: se asienta mostrando el inicio
+      // (todos sus días explican su motivo).
+      setAnchorPending(false);
+      jump(startM ?? month);
+      return;
+    }
+    jump(monthNext(month));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchorPending, loading, slots, slotsMonth, month, dateIso, proId]);
+
+  // H2-2: si el día elegido se descartó (revalidación en BookingFlow), re-atracar.
+  const prevDateRef = useRef<string | null>(dateIso ?? null);
+  useEffect(() => {
+    const was = prevDateRef.current;
+    prevDateRef.current = dateIso ?? null;
+    if (was && !dateIso) {
+      anchorSteps.current = 0;
+      setAnchorPending(true);
+      jump(isoToday().slice(0, 7));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateIso]);
 
   if (error) {
     return <Card className="p-5"><p className="text-sm text-ink-soft">{error}</p></Card>;
@@ -233,9 +327,15 @@ export function CalendarView({
   );
 
   /** Cambiar de mes: actualiza el grid local Y avisa al flujo (que puede guardar la cookie). */
-  function navigate(monthIso: string) {
+  /** Navegación interna del anclaje (H2-1): sigue buscando el primer mes con cupo. */
+  function jump(monthIso: string) {
     setMonth(monthIso);
     onNavigate(monthIso);
+  }
+  /** Navegación del usuario: desde aquí el calendario es suyo y el anclaje no interviene. */
+  function navigate(monthIso: string) {
+    setAnchorPending(false);
+    jump(monthIso);
   }
 }
 
