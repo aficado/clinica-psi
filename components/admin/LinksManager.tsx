@@ -389,11 +389,19 @@ export function LinksManager({
           ))}
         </ul>
 
-        {qrSlug ? (
-          <div className="mt-4">
-            <QrWidget url={`${siteBase}/c/${qrSlug}`} label={`el enlace /c/${qrSlug}`} />
-          </div>
-        ) : null}
+        {(() => {
+          // El QR del corto apunta DIRECTO al destino (no al /c/…): así el
+          // material impreso abre la URL final aunque el dominio corto no sea
+          // alcanzable. Los destinos internos (/agendar) se completan con la base.
+          const item = qrSlug ? shortLinks.find((s) => s.slug === qrSlug) : null;
+          if (!item) return null;
+          const url = /^https?:\/\//.test(item.target) ? item.target : `${siteBase}${item.target}`;
+          return (
+            <div className="mt-4">
+              <QrWidget url={url} label={`el destino de /c/${item.slug}`} />
+            </div>
+          );
+        })()}
       </section>
     </div>
   );

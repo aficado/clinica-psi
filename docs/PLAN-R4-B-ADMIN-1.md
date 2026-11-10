@@ -76,3 +76,8 @@ Motor de agenda, bloqueo de días, flujo público, RBAC y auditoría de datos. E
 - Fix: `/admin/enlaces` calcula la base con `SITE_BASE_URL` si existe (dominio público en producción) y, si no, con el **host real de la petición** (`x-forwarded-host`/`host` + proto). Verificado abriendo el panel por LAN: QR de `/links` → `http://192.168.1.8:3000/links` y cortos → `http://192.168.1.8:3000/c/<slug>`; `/c/ornith` → 301 al destino.
 - `QrWidget`: título genérico "Tu enlace" y se quitó la nota obsoleta de "en producción se personaliza…".
 - Nota de diseño: el QR apunta al **corto**, que redirige al destino; así el material impreso no se rehace si cambia la URL final. Si se prefiere QR directo al destino, es un cambio de una línea.
+
+**R4-B-ADMIN-4 — El QR de un corto apunta directo al destino (2026-11-10, criterio del dueño).**
+- Antes: el QR codificaba `${siteBase}/c/<slug>` (el corto), así que al escanearlo fuera de la LAN no abría.
+- Ahora: el QR codifica **la URL de destino** que escribiste. Si el destino es externo (`http(s)`) va tal cual (p. ej. `https://huggingface.co/…`); si es interno (`/agendar`) se completa con la base del sitio.
+- El enlace corto `/c/<slug>` sigue existiendo para texto/redes, pero el QR ya no depende de él. Verificado en el panel: QR de `ornith` → `https://huggingface.co/ornith-ai/Ornith-1.5-35B-A3B-GGUF/tree/main`; QR de `agendar` → `http://<host>/agendar`.
