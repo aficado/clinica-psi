@@ -90,3 +90,9 @@ Motor de agenda, bloqueo de días, flujo público, RBAC y auditoría de datos. E
 - **QR**: codifica el destino exacto (sin prefijos ni `/c/`).
 - **`/c/<slug>`**: los destinos antiguos internos ahora se completan con el **origen real** de la petición (antes usaban `siteUrl()` y morían en la LAN).
 - Verificado: alta `100.69.186.68:3000/cursos` → guardado como `http://100.69.186.68:3000/cursos`, nombre en la lista y QR con esa URL; `/cursos` → rechazado con el mensaje; `/c/ornith` sigue 301 a su destino.
+
+**R4-B-ADMIN-6 — El elemento del menú "desaparecía" según la página (2026-11-10).**
+- Diagnóstico: el elemento **nunca se borró** (seguía en `nav_items`, visible y renderizado). El problema era la **caché por ruta**: las acciones de menú llamaban `revalidatePath("/")`, que solo invalidaba la portada; las demás rutas estáticas (`/aprende`, `/cursos`, `/links`, `/contacto`…) seguían sirviendo el layout viejo. Por eso se veía en una página y "desaparecía" al navegar.
+- Fix: `invalidateLayout()` = `revalidatePath("/", "layout")` en `saveNavItem`, `deleteNavItem`, `restoreNavItem`, `moveNavItem` y `saveSocials` (el layout raíz se purga en **todas** las rutas).
+- UX: al guardar, banner de confirmación («Guardado «X». Ya se ve en el menú del sitio, en todas las páginas»), fila resaltada y autocierre a los 8 s.
+- Verificado sin rebuild: mover «facebook» arriba se refleja al instante en `/aprende` y `/cursos`; crear «Zz Prueba» aparece en `/` al momento y el banner sale; borrarlo lo quita de todas las rutas.

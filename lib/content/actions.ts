@@ -81,6 +81,17 @@ function invalidate(...paths: string[]): void {
   for (const p of paths) revalidatePath(p);
 }
 
+/**
+ * R4-B-ADMIN-6: el menú, las redes y el mapa viven en el layout raíz y se ven
+ * en TODAS las páginas. `revalidatePath("/")` solo revalidaba la portada, así
+ * que las demás rutas (estáticas) seguían sirviendo el encabezado viejo: un
+ * elemento nuevo "desaparecía" al navegar. Con el tipo "layout" se purga el
+ * layout completo en todas las rutas.
+ */
+function invalidateLayout(): void {
+  revalidatePath("/", "layout");
+}
+
 // ============================================================
 // Artículos (8.07)
 // ============================================================
@@ -372,7 +383,7 @@ export async function saveNavItem(input: NavItemInput): Promise<SaveResult> {
   const res = saveNavItemRow(input);
   if (!res.ok) return res;
   logAudit(p, input.id ? "menu.actualizar" : "menu.crear", "menu", input.id ?? null, input.label);
-  invalidate("/");
+  invalidateLayout();
   return res;
 }
 
@@ -382,7 +393,7 @@ export async function deleteNavItem(id: string): Promise<SaveResult> {
   const res = softDeleteById("nav_items", id);
   if (!res.ok) return res;
   logAudit(p, "menu.eliminar", "menu", id);
-  invalidate("/");
+  invalidateLayout();
   return res;
 }
 
@@ -392,7 +403,7 @@ export async function restoreNavItem(id: string): Promise<SaveResult> {
   const res = restoreById("nav_items", id);
   if (!res.ok) return res;
   logAudit(p, "menu.restaurar", "menu", id);
-  invalidate("/");
+  invalidateLayout();
   return res;
 }
 
@@ -403,7 +414,7 @@ export async function moveNavItem(id: string, dir: number): Promise<SaveResult> 
   const res = moveItem("nav_items", id, dir === 1 ? 1 : -1);
   if (!res.ok) return res;
   logAudit(p, "menu.mover", "menu", id, dir === 1 ? "abajo" : "arriba");
-  invalidate("/");
+  invalidateLayout();
   return res;
 }
 
@@ -451,7 +462,7 @@ export async function saveSocials(input: { instagram: string; facebook: string }
   const res = saveSocialsRow(input);
   if (!res.ok) return res;
   logAudit(p, "sitio.redes", "sitio", "current");
-  invalidate("/");
+  invalidateLayout();
   return res;
 }
 

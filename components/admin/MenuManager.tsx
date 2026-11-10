@@ -19,6 +19,7 @@ import {
   saveNavItem,
   saveSocials,
 } from "@/lib/content/actions";
+import { cn } from "@/lib/utils";
 import { Icon } from "@/components/ui";
 import { Chk, SaveBar, Sel, T } from "./content/ui";
 
@@ -33,6 +34,8 @@ export function MenuManager({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleted, setDeleted] = useState<{ id: string; label: string } | null>(null);
+  // R4-B-ADMIN-6: confirmación visible de lo que se acaba de guardar.
+  const [savedLabel, setSavedLabel] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ id: string; label: string; href: string; visible: boolean } | null>(
     null,
   );
@@ -68,6 +71,25 @@ export function MenuManager({
         <p role="alert" className="rounded-(--radius-input) bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta-dark">
           {error}
         </p>
+      ) : null}
+
+      {savedLabel ? (
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-(--radius-card) border border-sage/30 bg-sage/10 px-4 py-3 text-sm text-ink"
+        >
+          <p>
+            Guardado <strong>«{savedLabel}»</strong>. Ya se ve en el menú del sitio, en todas las
+            páginas.
+          </p>
+          <button
+            type="button"
+            onClick={() => setSavedLabel(null)}
+            className="text-sm font-semibold text-sage-dark underline-offset-2 hover:underline"
+          >
+            Cerrar
+          </button>
+        </div>
       ) : null}
 
       {deleted ? (
@@ -146,7 +168,11 @@ export function MenuManager({
                     href: draft.href,
                     visible: draft.visible,
                   });
-                  if (res.ok) setDraft(null);
+                  if (res.ok) {
+                    setDraft(null);
+                    setSavedLabel(draft.label.trim());
+                    window.setTimeout(() => setSavedLabel(null), 8000);
+                  }
                   return res;
                 });
               }}
@@ -159,7 +185,10 @@ export function MenuManager({
           {navItems.map((n, i) => (
             <li
               key={n.id}
-              className="flex flex-wrap items-center gap-3 rounded-(--radius-card) bg-white px-4 py-3 shadow-[0_1px_2px_rgba(31,42,39,0.06)]"
+              className={cn(
+                "flex flex-wrap items-center gap-3 rounded-(--radius-card) bg-white px-4 py-3 shadow-[0_1px_2px_rgba(31,42,39,0.06)]",
+                savedLabel === n.label && "ring-2 ring-sage/40",
+              )}
             >
               <div className="min-w-0 flex-1">
                 <p className="truncate font-semibold text-ink">{n.label}</p>
