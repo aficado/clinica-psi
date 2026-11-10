@@ -16,7 +16,7 @@
 | Fuentes | `next/font`: Fraunces + Inter | `display: swap`, variables CSS |
 | **BD local** | **`node:sqlite`** (Node ≥ 22) | `data/clinica-bienestar.db`, 17 tablas (12 + agenda R4-A + professionals R4-B-2 + date_exceptions R4-B-3), seed idempotente desde `lib/data.ts`; Supabase/RLS aplazados al despliegue (D-R4-1, `docs/BACKLOG-R4.md`) |
 | Sesión | HMAC-SHA256 stateless (`node:crypto`) | Cookie `rv_admin_session` (12 h); perfiles demo en `lib/admin/store.ts` (usuarios reales: Fase 4) |
-| QR | `qrcode` 1.5 | PNG/SVG en `QrWidget` (público y admin) |
+| QR | `qrcode` 1.5 | PNG/SVG en `QrWidget` (**solo admin** desde R4-B-ADMIN-2) |
 | Imagen OG | `sharp` (herramienta) | `scripts/make-og.mjs` → `public/images/og.png` |
 
 **Reservado (marcado `TODO:` en código y `.env.example`):** Supabase (despliegue/D-R4-1: usuarios, RLS), Resend (cola lista; falta R4-D: clave + remitente verificado), Mercado Pago (Fase 5), Plausible (7).
@@ -44,7 +44,7 @@
 | `agendar/page.tsx` | Flujo de reserva (4 pasos) con servicios de BD + profesionales de BD (`getProfessionals()`); disponibilidad REAL consultada por action (R4-A) |
 | `mi-cita/[token]/page.tsx` | Página server: lee la cita de la BD por token (`getAppointmentByToken`, R4-A) → `MiCitaClient` (ver/cancelar/reprogramar) |
 | `nosotros/page.tsx` · `contacto/page.tsx` · `privacidad/page.tsx` | Estáticas de identidad/contacto (contacto: dinámica, mapa desde BD) y aviso LFPDPPP |
-| `links/page.tsx` | Link-in-bio (7.03): botones de `link_items` + QR con URL absoluta (`siteUrl()/links`) |
+| `links/page.tsx` | Link-in-bio (7.03, **R4-B-ADMIN-2**): solo botones de `link_items`; la URL del enlace único y su QR son material del admin (`/admin/enlaces`) |
 | `c/[slug]/route.ts` | Enlace corto (7.01): 301 al destino de `short_links` (interno → absoluto), 404 si no existe |
 | `api/media/upload/route.ts` | POST de subida multipart (8.06): RBAC admin, disco + `media_assets` + auditoría |
 | `uploads/[name]/route.ts` | **Sirve subidas en runtime** (ronda 9): `next start` congela `public/` al arrancar; esta ruta lee el disco por request (guarda anti path-traversal + MIME) |
@@ -53,7 +53,7 @@
 | `admin/login/page.tsx` · `admin/login/[action]/page.tsx` | Login demo (8.01) y recuperación demo (`confirm`/`verify`) |
 | `admin/contenido/page.tsx` | Hub CRUD (8.07/8.08): 4 pestañas, deep-link `?tab=&edit=`; RBAC `canEditContent`; sin permiso → mensaje claro |
 | `admin/multimedia/page.tsx` | Biblioteca (8.06) → `MediaLibrary` |
-| `admin/enlaces/page.tsx` | Botones `/links` + enlaces cortos con QR (7.01–7.03); solo admin |
+| `admin/enlaces/page.tsx` | Botones `/links` + enlaces cortos con QR (7.01–7.03); **R4-B-ADMIN-2:** además el QR del propio `/links`; solo admin |
 | `admin/menu/page.tsx` | Menú, redes y **mapa** (8.11 + 8.15); solo admin |
 | `admin/testimonios/page.tsx` | Cola de aprobación (8.10); solo admin |
 | `admin/auditoria/page.tsx` | Bitácora server-rendered con filtros GET (8.12); solo admin |
@@ -84,7 +84,7 @@
 | `EnrollmentForm.tsx` · `ContactForm.tsx` · `ShareButtons.tsx` | Formularios demo (WhatsApp) y compartir/copiar |
 | `VideoEmbed.tsx` · `WhatsAppFloat.tsx` | Embed YouTube/Vimeo; botón flotante |
 | `QrWidget.tsx` | QR PNG/SVG descargable de cualquier URL (7.02) |
-| `LinksClient.tsx` | Botones de `/links` (props) + QR del propio enlace |
+| `LinksClient.tsx` | Botones de `/links` (props). **R4-B-ADMIN-2:** sin QR ni URL del enlace único (se generan en el panel) |
 
 ### 2.2b `components/admin/` — panel (16)
 

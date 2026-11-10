@@ -56,6 +56,8 @@ export function LinksManager({
     null,
   );
   const [qrSlug, setQrSlug] = useState<string | null>(null);
+  // QR del enlace único (/links): material del admin (ya no se muestra en público).
+  const [qrMain, setQrMain] = useState(false);
 
   async function run(fn: () => Promise<{ ok: boolean; error?: string }>) {
     setBusy(true);
@@ -256,6 +258,22 @@ export function LinksManager({
             </li>
           ))}
         </ul>
+
+        {/* QR del enlace único: solo el admin lo genera y descarga. */}
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <button type="button" className={btn} onClick={() => setQrMain((v) => !v)}>
+            <Icon name="qr" className="mr-1.5 h-4 w-4" />
+            {qrMain ? "Ocultar QR de /links" : "QR del enlace único (/links)"}
+          </button>
+          <span className="text-sm text-ink-soft">
+            Material para bio o impresión; no se muestra en la página pública.
+          </span>
+        </div>
+        {qrMain ? (
+          <div className="mt-4">
+            <QrWidget url={`${siteBase}/links`} label="el enlace único /links" />
+          </div>
+        ) : null}
       </section>
 
       {/* ================= Enlaces cortos ================= */}
