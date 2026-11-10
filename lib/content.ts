@@ -881,7 +881,7 @@ export function getShortLink(slug: string): ShortLinkView | null {
 export function getShortLinks(): ShortLinkView[] {
   seedIfEmpty();
   const rows = getDb()
-    .prepare(`SELECT * FROM short_links WHERE deleted_at IS NULL ORDER BY rowid`)
+    .prepare(`SELECT * FROM short_links WHERE deleted_at IS NULL ORDER BY rowid DESC`)
     .all() as unknown as ShortLinkRow[];
   return rows.map(rowToShortLink);
 }
@@ -1456,14 +1456,37 @@ export function moveItem(table: IdTable, id: string, dir: -1 | 1): SaveResult {
 // Enlaces cortos (7.01): /c/<slug> -> destino
 // ------------------------------------------------------------
 
+/**
+ * R4-B-ADMIN-5: el destino de un enlace corto es SIEMPRE una URL completa.
+ * - Con esquema (`https://…`, `http://…`) se usa tal cual.
+ * - Sin esquema pero con host (`100.69.186.68:3000/cursos`, `sitio.mx/x`)
+ *   se normaliza a `http://…`.
+ * - Una ruta suelta (`/cursos`) NO se acepta: no hay forma de saber en qué
+ *   sitio debe abrir el QR.
+ */
+function normalizeFullUrl(raw: unknown): string | null {
+  const t = str(raw).trim();
+  if (!t) return null;
+  if (/^https?:\/\/[^\s]+$/i.test(t)) return t;
+  if (/^[a-z0-9.-]+(:\d+)?(\/[^\s]*)?$/i.test(t) && (/\.[a-z]{2,}/i.test(t) || /:\d+/.test(t))) {
+    return `http://${t}`;
+  }
+  return null;
+}
+
 /** Crea o actualiza un enlace corto. El slug no cambia al editar. */
 export function saveShortLink(slug: string, target: string, label: string): SaveResult {
   seedIfEmpty();
   const s = validSlug(slug);
   if (!s.ok) return s;
-  const href = str(target).trim();
-  if (!validHref(href)) {
-    return { ok: false, error: "El destino debe ser interno (empieza con /) o una URL http(s)." };
+  const name = str(label).trim();
+  if (!name) return { ok: false, error: "Ponle un nombre al enlace." };
+  const href = normalizeFullUrl(target);
+  if (!href) {
+    return {
+      ok: false,
+      error: "Escribe la URL completa (p. ej. https://sitio.com/ruta o http://100.69.186.68:3000/cursos).",
+    };
   }
   const now = Date.now();
   const exists = getDb()
@@ -1472,12 +1495,12 @@ export function saveShortLink(slug: string, target: string, label: string): Save
   if (exists.length > 0) {
     getDb()
       .prepare(`UPDATE short_links SET target = ?, label = ?, updated_at = ? WHERE slug = ? AND deleted_at IS NULL`)
-      .run(href, str(label), now, s.slug);
+      .run(href, name, now, s.slug);
     return { ok: true, slug: s.slug };
   }
   getDb()
     .prepare(`INSERT INTO short_links (slug, target, label, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`)
-    .run(s.slug, href, str(label), now, now);
+    .run(s.slug, href, name, now, now);
   return { ok: true, slug: s.slug };
 }
 

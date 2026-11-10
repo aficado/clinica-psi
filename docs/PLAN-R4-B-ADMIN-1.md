@@ -81,3 +81,12 @@ Motor de agenda, bloqueo de días, flujo público, RBAC y auditoría de datos. E
 - Antes: el QR codificaba `${siteBase}/c/<slug>` (el corto), así que al escanearlo fuera de la LAN no abría.
 - Ahora: el QR codifica **la URL de destino** que escribiste. Si el destino es externo (`http(s)`) va tal cual (p. ej. `https://huggingface.co/…`); si es interno (`/agendar`) se completa con la base del sitio.
 - El enlace corto `/c/<slug>` sigue existiendo para texto/redes, pero el QR ya no depende de él. Verificado en el panel: QR de `ornith` → `https://huggingface.co/ornith-ai/Ornith-1.5-35B-A3B-GGUF/tree/main`; QR de `agendar` → `http://<host>/agendar`.
+
+**R4-B-ADMIN-5 — Refactor de enlaces cortos: nombre visible y URL completa (2026-11-10).**
+- **Por qué "no aparecían"**: el formulario rechazaba destinos sin esquema (`100.69.186.68:3000/cursos`) y rutas sueltas, así que el alta fallaba sin crear fila.
+- **Validación nueva** (`saveShortLink`): el destino es siempre una **URL completa**. Con esquema se usa tal cual; sin esquema pero con host (`100.69.186.68:3000/cursos`) se normaliza a `http://…`; una ruta suelta (`/cursos`) se rechaza con mensaje claro (el QR no sabría en qué sitio abrir). El **nombre es obligatorio**.
+- **Lista**: el título de cada fila es el **nombre**; debajo, el destino completo y, en pequeño, `/c/<slug>`.
+- **Orden**: los cortos más recientes aparecen primero (`ORDER BY rowid DESC`).
+- **QR**: codifica el destino exacto (sin prefijos ni `/c/`).
+- **`/c/<slug>`**: los destinos antiguos internos ahora se completan con el **origen real** de la petición (antes usaban `siteUrl()` y morían en la LAN).
+- Verificado: alta `100.69.186.68:3000/cursos` → guardado como `http://100.69.186.68:3000/cursos`, nombre en la lista y QR con esa URL; `/cursos` → rechazado con el mensaje; `/c/ornith` sigue 301 a su destino.

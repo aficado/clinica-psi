@@ -53,7 +53,7 @@
 | `admin/login/page.tsx` · `admin/login/[action]/page.tsx` | Login demo (8.01) y recuperación demo (`confirm`/`verify`) |
 | `admin/contenido/page.tsx` | Hub CRUD (8.07/8.08): 4 pestañas, deep-link `?tab=&edit=`; RBAC `canEditContent`; sin permiso → mensaje claro |
 | `admin/multimedia/page.tsx` | Biblioteca (8.06) → `MediaLibrary` |
-| `admin/enlaces/page.tsx` | Botones `/links` + enlaces cortos con QR (7.01–7.03); **R4-B-ADMIN-2:** además el QR del propio `/links`; **R4-B-ADMIN-3:** la base de los QR sale de `SITE_BASE_URL` o del host real de la petición; solo admin |
+| `admin/enlaces/page.tsx` | Botones `/links` + enlaces cortos con QR (7.01–7.03); **R4-B-ADMIN-2:** además el QR del propio `/links`; **R4-B-ADMIN-3:** la base de los QR sale de `SITE_BASE_URL` o del host real; **R4-B-ADMIN-5:** el QR de un corto codifica el destino completo y el nombre es el título de la fila; solo admin |
 | `admin/menu/page.tsx` | Menú, redes y **mapa** (8.11 + 8.15); solo admin |
 | `admin/testimonios/page.tsx` | Cola de aprobación (8.10); solo admin |
 | `admin/auditoria/page.tsx` | Bitácora server-rendered con filtros GET (8.12); solo admin |

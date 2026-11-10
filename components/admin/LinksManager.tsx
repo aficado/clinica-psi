@@ -292,30 +292,31 @@ export function LinksManager({
           </button>
         </div>
         <p className="mb-4 text-sm text-ink-soft">
-          URL amigable para carteles y redes: <strong>{siteBase}/c/nombre</strong> redirige al
-          destino que definas. Puedes reasignar el destino cuando quieras sin cambiar el enlace
-          impreso.
+          El QR apunta <strong>directo al destino</strong>: escribe la URL completa. El corto{" "}
+          <strong>/c/nombre</strong> queda para texto y redes. Puedes cambiar el destino sin
+          reimprimir el QR.
         </p>
 
         {shortDraft ? (
           <div className="mb-4 rounded-(--radius-card) bg-white p-5 shadow-[0_1px_2px_rgba(31,42,39,0.06)]">
             <div className="grid gap-4 sm:grid-cols-3">
               <T
-                label="Nombre corto"
+                label="Nombre"
+                value={shortDraft.label}
+                onChange={(v) => setShortDraft({ ...shortDraft, label: v })}
+                hint="Es el título del enlace en el panel."
+              />
+              <T
+                label="Nombre corto (/c/…)"
                 value={shortDraft.slug}
                 onChange={(v) => setShortDraft({ ...shortDraft, slug: v })}
                 hint="Solo minúsculas, números y guiones."
               />
               <T
-                label="Destino"
+                label="Destino (URL completa)"
                 value={shortDraft.target}
                 onChange={(v) => setShortDraft({ ...shortDraft, target: v })}
-                hint="Interno («/agendar») o URL completa."
-              />
-              <T
-                label="Descripción"
-                value={shortDraft.label}
-                onChange={(v) => setShortDraft({ ...shortDraft, label: v })}
+                hint="https://sitio.com/ruta o http://100.69.186.68:3000/cursos"
               />
             </div>
             <SaveBar
@@ -341,13 +342,9 @@ export function LinksManager({
               className="flex flex-wrap items-center gap-3 rounded-(--radius-card) bg-white px-4 py-3 shadow-[0_1px_2px_rgba(31,42,39,0.06)]"
             >
               <div className="min-w-0 flex-1">
-                <p className="truncate font-semibold text-ink">
-                  {siteBase}/c/{s.slug}
-                </p>
-                <p className="truncate text-xs text-ink-soft">
-                  → {s.target}
-                  {s.label ? ` · ${s.label}` : ""}
-                </p>
+                <p className="truncate font-semibold text-ink">{s.label || s.slug}</p>
+                <p className="truncate text-xs text-ink-soft">→ {s.target}</p>
+                <p className="truncate text-[11px] text-ink-soft/70">corto: /c/{s.slug}</p>
               </div>
               <button
                 type="button"
@@ -398,7 +395,7 @@ export function LinksManager({
           const url = /^https?:\/\//.test(item.target) ? item.target : `${siteBase}${item.target}`;
           return (
             <div className="mt-4">
-              <QrWidget url={url} label={`el destino de /c/${item.slug}`} />
+              <QrWidget url={url} label={`«${item.label || item.slug}»`} />
             </div>
           );
         })()}
