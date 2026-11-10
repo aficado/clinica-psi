@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { getSessionProfile } from "@/lib/admin/session";
 import { canAdmin } from "@/lib/rbac";
 import { getLinkItems, getShortLinks } from "@/lib/content";
@@ -50,8 +50,25 @@ export default async function EnlacesPage() {
       <LinksManager
         linkItems={getLinkItems(true)}
         shortLinks={getShortLinks()}
-        siteBase={siteUrl()}
+        siteBase={await baseUrl()}
       />
     </div>
   );
+}
+
+/**
+ * Base absoluta para los enlaces cortos y sus QR.
+ * - Si hay `SITE_BASE_URL` (dominio público en producción), manda esa.
+ * - Si no, usa el host REAL de la petición (LAN, localhost o el dominio donde
+ *   se abrió el panel): así el QR abre el sitio donde está sirviendo y no un
+ *   dominio de ejemplo que no resuelve.
+ */
+async function baseUrl(): Promise<string> {
+  const env = process.env.SITE_BASE_URL?.replace(/\/$/, "");
+  if (env) return env;
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host");
+  if (!host) return siteUrl();
+  const proto = h.get("x-forwarded-proto") ?? "http";
+  return `${proto}://${host}`;
 }

@@ -88,7 +88,7 @@ export function QrWidget({ url, label }: { url: string; label: string }) {
         </div>
       </div>
       <div>
-        <h2 className="text-2xl">Tu enlace único</h2>
+        <h2 className="text-2xl">Tu enlace</h2>
         <p className="mt-2 text-ink-soft">
           Compártelo en tus redes, en la bio o impreso en material: quien lo abra llega directo a {label}.
         </p>
@@ -101,10 +101,6 @@ export function QrWidget({ url, label }: { url: string; label: string }) {
             {copied ? "Copiado" : "Copiar enlace"}
           </Button>
         </div>
-        <p className="mt-3 text-xs text-ink-soft">
-          En producción este enlace se personaliza desde el panel de administración (epico E7):
-          nombre, color y página de destino.
-        </p>
       </div>
     </div>
   );

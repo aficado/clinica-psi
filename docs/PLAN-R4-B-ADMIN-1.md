@@ -70,3 +70,9 @@ Motor de agenda, bloqueo de días, flujo público, RBAC y auditoría de datos. E
   `/links` queda solo con los botones de `link_items`.
 - El QR del enlace único ahora se genera en **`/admin/enlaces`** (botón "QR del enlace único (/links)" + el QR por corto `/c/<slug>`).
 - Metadatos de la página sin la mención al QR. Verificado: `/links` 200 sin rastro de QR/URL; botones intactos.
+
+**R4-B-ADMIN-3 — Los QR apuntaban a un dominio inexistente (2026-11-10).**
+- Causa: `siteUrl()` devolvía `SITE_BASE_URL` o el ejemplo `https://www.raizviva.mx`; ese dominio no resuelve en la demo, así que **todos** los QR (y la URL mostrada) morían.
+- Fix: `/admin/enlaces` calcula la base con `SITE_BASE_URL` si existe (dominio público en producción) y, si no, con el **host real de la petición** (`x-forwarded-host`/`host` + proto). Verificado abriendo el panel por LAN: QR de `/links` → `http://192.168.1.8:3000/links` y cortos → `http://192.168.1.8:3000/c/<slug>`; `/c/ornith` → 301 al destino.
+- `QrWidget`: título genérico "Tu enlace" y se quitó la nota obsoleta de "en producción se personaliza…".
+- Nota de diseño: el QR apunta al **corto**, que redirige al destino; así el material impreso no se rehace si cambia la URL final. Si se prefiere QR directo al destino, es un cambio de una línea.
