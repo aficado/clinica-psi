@@ -199,6 +199,19 @@ export function MenuManager({
                   Oculto
                 </span>
               ) : null}
+              <button
+                type="button"
+                className={btn}
+                disabled={busy}
+                aria-label={`${n.visible ? "Deshabilitar" : "Habilitar"} ${n.label}`}
+                onClick={() =>
+                  void run(() =>
+                    saveNavItem({ id: n.id, label: n.label, href: n.href, visible: !n.visible }),
+                  )
+                }
+              >
+                {n.visible ? "Deshabilitar" : "Habilitar"}
+              </button>
               <span className="flex gap-1">
                 <button
                   type="button"

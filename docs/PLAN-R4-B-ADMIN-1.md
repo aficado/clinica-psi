@@ -96,3 +96,8 @@ Motor de agenda, bloqueo de días, flujo público, RBAC y auditoría de datos. E
 - Fix: `invalidateLayout()` = `revalidatePath("/", "layout")` en `saveNavItem`, `deleteNavItem`, `restoreNavItem`, `moveNavItem` y `saveSocials` (el layout raíz se purga en **todas** las rutas).
 - UX: al guardar, banner de confirmación («Guardado «X». Ya se ve en el menú del sitio, en todas las páginas»), fila resaltada y autocierre a los 8 s.
 - Verificado sin rebuild: mover «facebook» arriba se refleja al instante en `/aprende` y `/cursos`; crear «Zz Prueba» aparece en `/` al momento y el banner sale; borrarlo lo quita de todas las rutas.
+
+**R4-B-ADMIN-7 — Habilitar/Deshabilitar sin borrar (2026-11-10).**
+- Nuevo botón por fila en **Menú de navegación** (`/admin/menu`) y en **Botones de `/links`** (`/admin/enlaces`): «Deshabilitar» / «Habilitar». Reutiliza el campo `visible` (borrado no hace falta) y respeta el badge «Oculto».
+- Las acciones siguen con RBAC + auditoría y revalidan: menú con `revalidatePath("/", "layout")` (todas las rutas) y botones con `/links`.
+- Verificado: `facebook` off → sale del header de `/` al instante, botón pasa a «Habilitar»; on → vuelve. `onith` off → desaparece de `/links`; on → vuelve.

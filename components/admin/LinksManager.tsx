@@ -204,6 +204,25 @@ export function LinksManager({
                   Oculto
                 </span>
               ) : null}
+              <button
+                type="button"
+                className={btn}
+                disabled={busy}
+                aria-label={`${l.visible ? "Deshabilitar" : "Habilitar"} ${l.label}`}
+                onClick={() =>
+                  void run(() =>
+                    saveLinkItem({
+                      id: l.id,
+                      label: l.label,
+                      href: l.href,
+                      isPrimary: l.isPrimary,
+                      visible: !l.visible,
+                    }),
+                  )
+                }
+              >
+                {l.visible ? "Deshabilitar" : "Habilitar"}
+              </button>
               <span className="flex gap-1">
                 <button
                   type="button"
