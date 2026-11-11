@@ -14,11 +14,12 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Profesionales",
-  description: "Profesionales de la agenda: alta, edición, activación y baja.",
+  description: "Profesionales de la agenda: servicios, modalidades, horario, alta y baja.",
 };
 
 /**
- * Módulo Profesionales (R4-B-2, 5.10): gestión de quién atiende qué.
+ * Módulo Profesionales (R4-B-2, refactor R4-B-PROF-1): gestión de quién
+ * atiende qué, en qué modalidad y con qué horario.
  * Acceso: administrador y terapeuta (`canManageSchedule`), igual que la
  * agenda. Al guardar, las reglas de `availability_rules` se alinean
  * con el perfil, de modo que la agenda pública refleja los cambios.

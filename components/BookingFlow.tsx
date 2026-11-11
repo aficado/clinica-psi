@@ -545,10 +545,7 @@ export function BookingFlow({
                     onClick={() => pickPro(p.id)}
                     className="btn w-full rounded-(--radius-card) border-2 border-sage/40 bg-white p-4 text-left font-semibold hover:border-sage hover:bg-sage/10"
                   >
-                    <span className="flex flex-wrap items-center gap-2">
-                      {p.name}
-                      <TodoChip>TODO: profesional de muestra</TodoChip>
-                    </span>
+                    <span className="flex flex-wrap items-center gap-2">{p.name}</span>
                     <span className="mt-1 block text-sm font-normal text-ink-soft">{p.role}</span>
                     <span className="mt-1 block text-sm text-ink-soft">
                       {p.days.length === 6 ? "Lunes a sábado" : "Lunes a viernes"} ·{" "}

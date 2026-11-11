@@ -310,9 +310,10 @@ export function daySlotsFor(dateIso: string, proId: string): DaySlotsWithReason 
   const lastDayOfMonth = `${yearMonth}-${String(getLastDayOfMonth(dateIso)).padStart(2, "0")}`;
   const taken = takenSet(proId, firstDayOfMonth, lastDayOfMonth);
 
-  const blocks = 1; // la duración del servicio ya se valida al agendar (`slotCandidateError`)
+  // R4-B-PROF-1: el rango configurado es INCLUSIVO (x…y): si el panel dice
+  // «última cita 20», también se ofrece 20:00.
   const hours: { hour: number; taken: boolean }[] = [];
-  for (let h = rule.open; h + blocks <= rule.close; h++) {
+  for (let h = rule.open; h <= rule.close; h++) {
     hours.push({ hour: h, taken: taken.has(`${dateIso}|${h}`) });
   }
   return {
@@ -366,7 +367,9 @@ function slotCandidateError(
   if (!pro) return "Ese profesional no está disponible ahora mismo.";
   if ((modality !== "presencial" && modality !== "enlinea") || !svc.modalities.includes(modality as "presencial" | "enlinea"))
     return "La modalidad no aplica a este servicio.";
-  if (!professionalsFor(svc, modality as "presencial" | "enlinea").some((p) => p.id === proId))
+  // R4-B-PROF-1: la validación usa la BD (antes usaba la lista demo de
+  // `lib/data.ts` y rechazaba a profesionales creados en el panel).
+  if (!professionalsFor(svc, modality as "presencial" | "enlinea", getProfessionals()).some((p) => p.id === proId))
     return "Ese profesional no atiende este servicio en esa modalidad.";
   const win = windowBounds();
   if (dateIso < win.min) return "Solo puedes agendar a partir de mañana.";
@@ -378,8 +381,7 @@ function slotCandidateError(
   // en la vista): aunque alguien mande el slot a mano, no se agenda.
   const ex = exceptionFor(proId, dateIso);
   if (ex) return `Ese día está bloqueado en la agenda (${exceptionLabel(ex)}). Elige otro.`;
-  const blocks = Math.max(1, Math.ceil(svc.duration / 60));
-  if (hour < rule.open || hour + blocks > rule.close) return "Esa hora está fuera del horario del profesional.";
+  if (hour < rule.open || hour > rule.close) return "Esa hora está fuera del horario del profesional.";
   return null;
 }
 

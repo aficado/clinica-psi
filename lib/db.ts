@@ -364,6 +364,17 @@ function ensureSchema(conn: DatabaseSync): void {
     );
   `);
 
+  // R4-B-PROF-1: modalidades que ofrece cada profesional (presencial / en línea).
+  // Compatibilidad: las filas existentes quedan con ambas.
+  const proCols = conn
+    .prepare("PRAGMA table_info(professionals)")
+    .all() as Array<{ name: string }>;
+  if (!proCols.some((c) => c.name === "modalities_json")) {
+    conn.exec(
+      `ALTER TABLE professionals ADD COLUMN modalities_json TEXT NOT NULL DEFAULT '["presencial","enlinea"]';`,
+    );
+  }
+
   // 5.07 (D4 pendiente de decisión del dueño): anticipación mínima para
   // cancelar/reprogramar desde `/mi-cita`, configurable. Default 24 h.
   const agendaSiteCols = conn

@@ -40,6 +40,7 @@ interface ProfessionalInput {
   name: string;
   role: string;
   services: string[];
+  modalities: string[];
   days: number[];
   open: number;
   close: number;
@@ -53,8 +54,11 @@ function validate(input: ProfessionalInput, id: string | null): string | null {
     return "El nombre del profesional es demasiado corto.";
   if (input.open < 0 || input.open > 23 || input.close < 1 || input.close > 24)
     return "El horario de apertura y cierre deben ser horas válidas (0–23 / 1–24).";
+  const mods = input.modalities.filter((m) => m === "presencial" || m === "enlinea");
+  if (mods.length === 0)
+    return "Marca al menos una modalidad: presencial, en línea o ambas.";
   if (input.open >= input.close)
-    return "La hora de cierre debe ser posterior a la de apertura.";
+    return "La última cita debe ser posterior a la primera (rango inclusivo x…y).";
   if (input.days.length === 0)
     return "Marca al menos un día de atención (el profesional sin días no aparece en la agenda).";
   if (input.days.some((d) => d < 1 || d > 6))
@@ -90,10 +94,12 @@ export async function saveProfessional(
   const db = getDb();
   seedProfessionalsIfEmpty();
 
+  const modalities = input.modalities.filter((m) => m === "presencial" || m === "enlinea");
+
   if (existing) {
     db.prepare(
       `UPDATE professionals
-         SET name = ?, role = ?, services_json = ?, days_json = ?,
+         SET name = ?, role = ?, services_json = ?, modalities_json = ?, days_json = ?,
              open_hour = ?, close_hour = ?, sat_open = ?, sat_close = ?,
              active = 1, updated_at = ?
        WHERE id = ? AND deleted_at IS NULL`,
@@ -101,6 +107,7 @@ export async function saveProfessional(
       input.name.trim(),
       input.role.trim(),
       JSON.stringify(input.services),
+      JSON.stringify(modalities),
       JSON.stringify(input.days),
       input.open,
       input.close,
@@ -112,14 +119,15 @@ export async function saveProfessional(
   } else {
     db.prepare(
       `INSERT INTO professionals
-         (id, name, role, services_json, days_json, open_hour, close_hour,
+         (id, name, role, services_json, modalities_json, days_json, open_hour, close_hour,
           sat_open, sat_close, active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
     ).run(
       proId,
       input.name.trim(),
       input.role.trim(),
       JSON.stringify(input.services),
+      JSON.stringify(modalities),
       JSON.stringify(input.days),
       input.open,
       input.close,
@@ -138,7 +146,7 @@ export async function saveProfessional(
     existing ? "profesional.editar" : "profesional.crear",
     "profesional",
     proId,
-    `${input.name.trim()} (${input.days.length} días)`,
+    `${input.name.trim()} (${input.days.length} días · ${modalities.join("+")})`,
   );
   revalidatePath("/admin/profesionales");
   revalidatePath("/admin/horarios");

@@ -152,6 +152,8 @@ export interface Professional {
   name: string; // TODO: nombre real
   role: string; // TODO: título real
   services: string[]; // slugs de servicio
+  /** R4-B-PROF-1: modalidades que ofrece (si falta = ambas). */
+  modalities?: Array<"presencial" | "enlinea">;
   days: number[]; // 1=lunes ... 6=sábado
   open: number; // hora de apertura (24h)
   close: number; // hora de cierre (24h)
@@ -164,6 +166,7 @@ export const professionals: Professional[] = [
     name: "Dra. Mariana Solís", // TODO
     role: "Psicóloga clínica — cédula profesional [TODO]",
     services: ["terapia-individual", "terapia-pareja", "terapia-familiar", "nutricion"],
+    modalities: ["presencial", "enlinea"],
     days: [1, 2, 3, 4, 5],
     open: 9,
     close: 17,
@@ -173,6 +176,7 @@ export const professionals: Professional[] = [
     name: "Lic. Jorge Aranda", // TODO
     role: "Terapeuta de masaje y medicina china",
     services: ["masaje-terapeutico", "medicina-china"],
+    modalities: ["presencial"],
     days: [1, 2, 3, 4, 5, 6],
     open: 9,
     close: 17,

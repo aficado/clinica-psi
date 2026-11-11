@@ -19,6 +19,7 @@ interface ProfessionalRow {
   name: string;
   role: string;
   services_json: string;
+  modalities_json: string;
   days_json: string;
   open_hour: number;
   close_hour: number;
@@ -36,6 +37,8 @@ export interface ProfessionalAdminView {
   name: string;
   role: string;
   services: string[];
+  /** R4-B-PROF-1: modalidades que ofrece (al menos una). */
+  modalities: Array<"presencial" | "enlinea">;
   days: number[];
   open: number;
   close: number;
@@ -65,6 +68,12 @@ function parseStrings(json: string): string[] {
   }
 }
 
+/** R4-B-PROF-1: modalidades guardadas; ausente/vacío = ambas (compatibilidad). */
+function parseModalities(json: string): Array<"presencial" | "enlinea"> {
+  const v = parseStrings(json).filter((m) => m === "presencial" || m === "enlinea");
+  return (v.length > 0 ? v : ["presencial", "enlinea"]) as Array<"presencial" | "enlinea">;
+}
+
 /** Fila → vista del panel (filas de `node:sqlite` → SIEMPRE objeto plano). */
 function rowToView(r: ProfessionalRow): ProfessionalAdminView {
   const saturday =
@@ -76,6 +85,7 @@ function rowToView(r: ProfessionalRow): ProfessionalAdminView {
     name: r.name,
     role: r.role,
     services: parseStrings(r.services_json),
+    modalities: parseModalities(r.modalities_json ?? ""),
     days: parseIds(r.days_json),
     open: r.open_hour,
     close: r.close_hour,
@@ -94,6 +104,7 @@ function viewToProfessional(v: ProfessionalAdminView): Professional {
     name: v.name,
     role: v.role,
     services: v.services,
+    modalities: v.modalities,
     days: v.days,
     open: v.open,
     close: v.close,
@@ -116,8 +127,8 @@ export function seedProfessionalsIfEmpty(): void {
     const now = Date.now();
     const ins = getDb().prepare(
       `INSERT INTO professionals
-         (id, name, role, services_json, days_json, open_hour, close_hour, sat_open, sat_close, active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+         (id, name, role, services_json, modalities_json, days_json, open_hour, close_hour, sat_open, sat_close, active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
     );
     for (const p of demoProfessionals) {
       ins.run(

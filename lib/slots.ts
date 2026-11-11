@@ -44,7 +44,12 @@ export function professionalsFor(
   pros: Professional[] = defaultProfessionals,
 ): Professional[] {
   if (!service.modalities.includes(modality)) return [];
-  return pros.filter((p) => p.services.includes(service.slug));
+  return pros.filter((p) => {
+    if (!p.services.includes(service.slug)) return false;
+    // R4-B-PROF-1: el profesional debe ofrecer esa modalidad (sin dato = ambas).
+    const mods = p.modalities ?? ["presencial", "enlinea"];
+    return mods.length === 0 || mods.includes(modality);
+  });
 }
 
 /** Genera slots para el servicio/profesional en los próximos `days` días. */
