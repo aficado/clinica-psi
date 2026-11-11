@@ -68,7 +68,13 @@ try {
   // --- PB-1: un día con cupos, clic → panel → bloquear ---
   await admin.page.goto(`${base}/admin/horarios?tab=calendario`, { waitUntil: "networkidle0" });
   await sleep(1500);
-  const target = await admin.js(() => {
+  // Días ya bloqueados (p. ej. los del dueño) no se tocan.
+  const ocupados = new Set();
+  for (const r of db.prepare("SELECT date_from, date_to FROM date_exceptions WHERE active = 1").all()) {
+    for (let cur = r.date_from; cur <= r.date_to; cur = new Date(new Date(`${cur}T12:00:00`).getTime() + 86400000).toISOString().slice(0, 10))
+      ocupados.add(cur);
+  }
+  const target = await admin.js((ocupados) => {
     const today = new Date();
     const tIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
     const bs = [...document.querySelectorAll('[role="grid"] button')];
@@ -76,10 +82,10 @@ try {
       const title = b.getAttribute("title") || "";
       const iso = title.split(" ")[0];
       const m = /(\d+) libres/.exec(title);
-      if (m && Number(m[1]) > 1 && iso > tIso) return iso;
+      if (m && Number(m[1]) > 1 && iso > tIso && !ocupados.includes(iso)) return iso;
     }
     return null;
-  });
+  }, [...ocupados]);
   line(`1) día objetivo (con cupos, futuro): ${target}`);
   if (!target) { fails++; throw new Error("no se encontró un día con cupos"); }
 

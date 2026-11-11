@@ -55,3 +55,13 @@ El panel de bloqueo se anclaba al día clicado y a veces quedaba pegado al borde
 - Es un **diálogo fijo centrado** (`fixed left-1/2 top-1/2 -translate…`), ancho `min(24rem, 100vw-2rem)` y `max-h-85vh` con scroll.
 - Fondo oscurecido (`bg-ink/30`); **clic fuera cierra** y **Escape** también.
 - Verificado en 1366 (centro exacto 683×450) y en 390 px (cabe, sin desbordes); abre → clic fuera → cierra ✔; Escape ✔.
+
+## 7. CL-9 — BUG: liberar a un profesional desbloqueaba a todos (2026-11-11)
+
+**Diagnóstico:** en la BD `freeDay` ya respetaba el profesional (solo borra/parte sus filas). El fallo era del **repintado optimista**: `override` se indexaba solo por fecha, así que al liberar a un profesional el calendario (que muestra a otro) pintaba el día como abierto y el aviso decía «Día liberado», dando la impresión de que se liberó a todos.
+
+**Fix:** la clave del override pasa a `proId|fecha`; al liberar solo se marca al profesional afectado y el aviso indica cuántos más siguen bloqueados («Día liberado solo para X. N profesional(es) más siguen bloqueados»). Deshacer limpia todas las claves de esa fecha.
+
+**Verificado:** bloquear Dra+Lic (9–12), liberar a Lic → BD conserva Dra; la celda de Dra sigue «Bloqueado» y el aviso lo dice. `flow-verify-cal1` ✔ (7b).
+
+**Colateral corregido:** la limpieza de `flow-verify-r4b3` pulsaba «Eliminar» genérico y había borrado un bloqueo real (Manuel, 12-nov); ahora borra solo `note LIKE 'PRUEBA-R4B-3%'`. El bloqueo del dueño se **restauró**. `flow-verify-ux1` ahora excluye días ya bloqueados al elegir su día de prueba.

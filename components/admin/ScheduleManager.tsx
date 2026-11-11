@@ -109,7 +109,11 @@ export function ScheduleManager({
   const [dayStart, setDayStart] = useState("9");
   const [dayEnd, setDayEnd] = useState("12");
   const [panelBusy, setPanelBusy] = useState(false);
-  /** Repintado inmediato del día sin esperar el re-render del servidor. */
+  /**
+   * Repintado inmediato del día sin esperar al servidor. R4-B-CAL-3: la clave es
+   * `proId|fecha` — antes era solo la fecha y liberar a un profesional pintaba
+   * el día como abierto para TODOS (bug reportado).
+   */
   const [override, setOverride] = useState<Record<string, "cerrado" | "abierto">>({});
   /** Pila de operaciones deshacibles (PB-4) — vive en esta sesión de página. */
   const [undoStack, setUndoStack] = useState<{ undo: DayOpUndo; label: string }[]>([]);
@@ -317,7 +321,14 @@ export function ScheduleManager({
     }
     const label = formatDateLongMX(dayPanel.iso);
     // Con franja horaria el día no queda cerrado entero: no se pinta de rojo.
-    if (dayAllDay) setOverride((o) => ({ ...o, [dayPanel.iso]: "cerrado" }));
+    if (dayAllDay) {
+      const keys = dayAllClinic ? [proId] : proIds;
+      setOverride((o) => {
+        const n = { ...o };
+        for (const k of keys) n[`${k}|${dayPanel.iso}`] = "cerrado";
+        return n;
+      });
+    }
     setUndoStack((s) => [...s.slice(-19), { undo: res.undo, label: `Bloqueo de ${label}` }]);
     const quien = dayAllClinic
       ? "toda la clínica"
@@ -343,13 +354,20 @@ export function ScheduleManager({
       return;
     }
     const label = formatDateLongMX(dayPanel.iso);
-    setOverride((o) => ({ ...o, [dayPanel.iso]: res.stillBlocked ? "cerrado" : "abierto" }));
-    setUndoStack((s) => [...s.slice(-19), { undo: res.undo, label: `Liberar ${label}` }]);
+    setOverride((o) => ({
+      ...o,
+      [`${blockProId}|${dayPanel.iso}`]: res.stillBlocked ? "cerrado" : "abierto",
+    }));
+    // ¿Otros profesionales siguen bloqueados ese día?
+    const otros = (dayBlocks ?? []).filter((e) => e.active && e.proId !== blockProId).length;
+    setUndoStack((s) => [...s.slice(-19), { undo: res.undo, label: `Liberar ${label} (${proName(blockProId)})` }]);
     setBanner({
       kind: "ok",
       text: res.stillBlocked
-        ? `Liberado el bloqueo de ${label}, pero el día sigue bloqueado por un bloqueo de toda la clínica.`
-        : `Día liberado: ${label}. Si era un rango, el resto de los días sigue bloqueado.`,
+        ? `Liberado el bloqueo de ${proName(blockProId)} en ${label}, pero el día sigue bloqueado por un bloqueo de toda la clínica.`
+        : otros > 0
+          ? `Día liberado solo para ${proName(blockProId)} (${label}). ${otros} profesional(es) más siguen bloqueados ese día.`
+          : `Día liberado: ${label}. Si era un rango, el resto de los días sigue bloqueado.`,
       preview: previewHref(dayPanel.iso),
     });
     closeDayPanel();
@@ -369,7 +387,7 @@ export function ScheduleManager({
     setUndoStack((s) => s.slice(0, -1));
     setOverride((o) => {
       const n = { ...o };
-      delete n[last.undo.dayIso];
+      for (const k of Object.keys(n)) if (k.endsWith(`|${last.undo.dayIso}`)) delete n[k];
       return n;
     });
     setBanner({ kind: "ok", text: `Deshecho: ${last.label}.` });
@@ -727,7 +745,7 @@ export function ScheduleManager({
                       ))}
                       {calDays.map((d) => {
                         // PB-1: cada día es un botón — clic = bloquear/liberar ese día exacto.
-                        const ov = override[d.dateIso];
+                        const ov = override[`${proId}|${d.dateIso}`];
                         const blocked = ov ? ov === "cerrado" : d.reason === "cerrado";
                         const state = blocked
                           ? "cerrado"

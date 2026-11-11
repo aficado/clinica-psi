@@ -92,16 +92,22 @@ try {
   }, mesActual);
   await sleep(900);
   const hoyIso = isoOf(hoy);
-  const target = await js((hoyIsoS) => {
+  // Días ya bloqueados (p. ej. los del dueño): no se tocan.
+  const ocupados = new Set();
+  for (const r of db.prepare("SELECT date_from, date_to FROM date_exceptions WHERE active = 1").all()) {
+    for (let cur = r.date_from; cur <= r.date_to; cur = new Date(new Date(`${cur}T12:00:00`).getTime() + 86400000).toISOString().slice(0, 10))
+      ocupados.add(cur);
+  }
+  const target = await js((hoyIsoS, ocupados) => {
     const b = [...document.querySelectorAll('[role="grid"] button')].find((x) => {
       const t = x.getAttribute("title") || "";
       const iso = t.slice(0, 10);
-      return iso > hoyIsoS && /libres/.test(t);
+      return iso > hoyIsoS && /libres/.test(t) && !ocupados.includes(iso);
     });
     if (!b) return null;
     b.click();
     return b.getAttribute("title").slice(0, 10);
-  }, hoyIso);
+  }, hoyIso, [...ocupados]);
   line(`5) día elegido: ${target}`);
   if (!target) { fails++; throw new Error("no hay día futuro con cupo en el mes actual"); }
   await sleep(900);
@@ -174,6 +180,30 @@ try {
   const okPriv = !pv.texto;
   const okHoras = bloqueadas.length === 4 && pv.horas.includes("13:00");
   if (!okPriv || !okHoras) fails++;
+
+  // ---------- 4b) R4-B-CAL-3: liberar a UNO no desbloquea al resto ----------
+  // (el calendario está mostrando a `dra`; se libera a `lic`, el segundo bloqueo)
+  await p.evaluate((iso) => {
+    const cell = [...document.querySelectorAll('[role="grid"] button')].find((x) => (x.getAttribute("title") || "").startsWith(iso));
+    cell?.click();
+  }, target);
+  await sleep(900);
+  const liberados = await p.evaluate(() => {
+    const d = document.querySelector('[role="dialog"]');
+    const btns = [...d.querySelectorAll("button")].filter((b) => /Liberar este día/.test(b.textContent));
+    btns[btns.length - 1]?.click();
+    return btns.length;
+  });
+  await sleep(2600);
+  const restantes = db.prepare("SELECT pro_id FROM date_exceptions WHERE note='PRUEBA-CAL1'").all().map((r) => r.pro_id);
+  const cellDra = JSON.parse(await p.evaluate((iso) => {
+    const b = [...document.querySelectorAll('[role="grid"] button')].find((x) => (x.getAttribute("title") || "").startsWith(iso));
+    return JSON.stringify({ pressed: b?.getAttribute("aria-pressed"), title: b?.getAttribute("title") ?? "" });
+  }, target));
+  const bannerLib = await p.evaluate(() => document.querySelector('[role="status"]')?.textContent?.replace(/\s+/g, " ").trim() ?? "");
+  line(`7b) liberar a 1 de 2 (${liberados} bloques): quedan=${JSON.stringify(restantes)} · celda Dra pressed=${cellDra.pressed} ("${String(cellDra.title).slice(0, 40)}") · banner="${bannerLib.slice(0, 90)}"`);
+  const okLibre = liberados === 2 && restantes.length === 1 && restantes[0] === ids[0] && cellDra.pressed === "true" && /siguen bloqueados/i.test(bannerLib);
+  if (!okLibre) fails++;
 
   // ---------- 5) móvil: sin desbordes ----------
   await p.setViewport({ width: 390, height: 844 });

@@ -246,13 +246,10 @@ try {
   // --- 5. limpieza: borrar el bloqueo y restaurar ajustes --------------------
   await admin.page.goto(`${base}/admin/horarios?tab=calendario`, { waitUntil: "networkidle0" });
   await sleep(1300);
-  for (let i = 0; i < 4; i++) {
-    const clicked = await admin.clickBtn("Eliminar");
-    await sleep(400);
-    if (!clicked) break;
-    await admin.clickBtn("Sí, eliminar");
-    await sleep(1600);
-  }
+  // R4-B-CAL-3: borrar SOLO los bloqueos de esta prueba (antes se pulsaba
+  // «Eliminar» genérico y podía borrar un bloqueo real del dueño).
+  const borrados = db.prepare("DELETE FROM date_exceptions WHERE note LIKE 'PRUEBA-R4B-3%'").run().changes;
+  line(`5a0) bloqueos de prueba borrados: ${borrados}`);
   const left = db.prepare("SELECT COUNT(*) n FROM date_exceptions WHERE note LIKE 'PRUEBA-R4B-3%'").get().n;
   line(`5a) excepciones PRUEBA restantes: ${left}`);
   if (left !== 0) fails++;
