@@ -56,7 +56,8 @@
 | `admin/enlaces/page.tsx` | Botones `/links` + enlaces cortos con QR (7.01–7.03); **R4-B-ADMIN-2:** además el QR del propio `/links`; **R4-B-ADMIN-3:** la base de los QR sale de `SITE_BASE_URL` o del host real; **R4-B-ADMIN-5:** el QR de un corto codifica el destino completo y el nombre es el título de la fila; solo admin |
 | `admin/menu/page.tsx` | Menú, redes y **mapa** (8.11 + 8.15); solo admin |
 | `admin/testimonios/page.tsx` | Cola de aprobación (8.10); solo admin |
-| `admin/auditoria/page.tsx` | Bitácora server-rendered con filtros GET (8.12); solo admin |
+| `admin/registro/page.tsx` | **R4-B-AUDIT-2:** panel OCULTO de auditoría (no está en el menú; enlace discreto «registro» al pie de la barra). Admin-only; descarga por días y horas en `.md`/`.txt` |
+| `api/audit/export/route.ts` | **R4-B-AUDIT-2:** genera la descarga de auditoría por rango de días/horas (zona del sitio, horas inclusivas, RBAC admin, `Content-Disposition: attachment`) |
 | `admin/horarios/page.tsx` | **Agenda (R4-A, 5.10 parcial)**: citas + horarios por día; `getRules()`/`listAppointments()` server-rendered; RBAC `canManageSchedule` (admin+terapeuta) |
 | `admin/servicios/page.tsx` (R4-B-2) | **Vista dedicada de agenda** de los servicios: listado con duración/buffer/modalidades/visible y enlaces profundos al editor de Contenido (`/admin/contenido?tab=servicios&edit=<slug>`). No duplica la tabla `services` (decisión D-R4-B-2: un dato, un solo sitio); RBAC `canEditContent` |
 | `admin/profesionales/page.tsx` (nuevo, R4-B-2) | Alta/edición/activación/baja blanda de profesionales: nombre, rol, casillas de servicios, días + horario (sábado opcional), `inactivo`; guarda en `professionals` y **alinea** `availability_rules` al guardar; semilla demo desde `lib/data` si la BD está vacía; RBAC `canManageSchedule` |
@@ -115,7 +116,7 @@
 
 | `services/admin.ts` (nuevo, R4-B) | Servicios de la agenda: CRUD desde el panel, slug inmutable, baja lógica; lee/actualiza `service_catalog` en BD |
 | `professionals.ts` (nuevo, R4-B-2) | Profesionales de la agenda: capa de lectura de la tabla `professionals` (identidad) al tipo `Professional`; semilla demo desde `lib/data` si la BD está vacía; `getProfessionals()` (activos) y `getProfessionalsAll()` (panel); `upsertRulesForPro` alinea `availability_rules` con el perfil al guardar; **R4-B-PROF-1**: modalidades por profesional (vista, semilla, `viewToProfessional`) y filtro en el motor |
-| `audit.ts` | `logAudit` + `getAuditLogs` (filtros, máx. 300) |
+| `audit.ts` | `logAudit` + `getAuditLogs` (filtros, máx. 300); **R4-B-AUDIT-2:** `getAuditLogsRange(from, to)`, ascendente para exportar |
 | `rbac.ts` | `canAdmin` / `canEditContent` (admin+therapist) / `canManageSchedule` (admin+therapist, R4-A) / `canEditAppearance` / `canManageMedia` |
 | `themes.ts` · `themes-core.ts` · `fonts.ts` | Tema en BD (`theme_tokens`; `getThemeTokens` devuelve copia PLANA), valores por defecto client-safe, fuentes curadas |
 | `contrast.ts` | Contraste WCAG (helper reutilizable; hoy sin consumidor directo en UI) |
@@ -151,7 +152,7 @@
 |---|---|---|
 | `/` · `/gratis` · `/gratis/[slug]` · `/aprende` · `/aprende/[slug]` · `/servicios` · `/servicios/[slug]` (+JSON-LD) · `/cursos` · `/cursos/[slug]` · `/agendar` · `/mi-cita/[token]` · `/links` | ƒ (BD) | E1–E7 |
 | `/nosotros` · `/privacidad` · `/contacto` (ƒ: mapa BD) · `/c/[slug]` (301/404) | ○/ƒ | E1, E7, E9 |
-| `/admin` + `login` + `login/[action]` + `contenido` + `horarios` + `multimedia` + `enlaces` + `menu` + `testimonios` + `auditoria` | ƒ `noindex` | E8, E5 (R4-A) |
+| `/admin` + `login` + `login/[action]` + `contenido` + `horarios` + `multimedia` + `enlaces` + `menu` + `testimonios` + **`registro` (oculto)** | ƒ `noindex` | E8, E5 (R4-A); auditoría visible retirada en R4-B-AUDIT-2 |
 | `/api/media/upload` · `/uploads/[name]` | ƒ | E8 (8.06) |
 | `_not-found` · `/robots.txt` · `/sitemap.xml` (ƒ, desde BD) | ○/ƒ | E10 |
 
@@ -197,7 +198,7 @@ login → cookie rv_admin_session → layout valida sesión → AdminShell (nav 
   /admin/multimedia MediaLibrary       (canAdmin)         /admin/enlaces  LinksManager (canAdmin)
   /admin/menu       MenuManager (nav + redes + mapa)      (canAdmin)
   /admin/testimonios TestimonialsManager (consentimiento) (canAdmin)
-  /admin/auditoria  bitácora (canAdmin)
+  /admin/registro   panel oculto: descarga de auditoría (canAdmin; sin enlace en el menú)
 ```
 
 | Módulo | admin | therapist | assistant |

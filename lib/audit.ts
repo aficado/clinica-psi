@@ -66,3 +66,13 @@ export function getAuditLogs(opts?: {
     .all(...params, limit) as unknown as AuditLogRow[];
   return rows;
 }
+
+/** R4-B-AUDIT-2: todas las entradas de un rango [fromMs, toMs), ascendente (export). */
+export function getAuditLogsRange(fromMs: number, toMs: number): AuditLogRow[] {
+  return getDb()
+    .prepare(
+      `SELECT * FROM audit_logs WHERE created_at >= ? AND created_at < ?
+       ORDER BY created_at ASC, id ASC`,
+    )
+    .all(fromMs, toMs) as unknown as AuditLogRow[];
+}

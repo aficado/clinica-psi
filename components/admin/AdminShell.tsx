@@ -35,7 +35,6 @@ const navItems: Array<{
   { id: "enlaces", label: "Enlaces", href: "/admin/enlaces", icon: "link", roles: ["admin"] },
   { id: "testimonios", label: "Testimonios", href: "/admin/testimonios", icon: "heart", roles: ["admin"] },
   { id: "menu", label: "Menú y redes", href: "/admin/menu", icon: "menu", roles: ["admin"] },
-  { id: "auditoria", label: "Auditoría", href: "/admin/auditoria", icon: "shield", roles: ["admin"] },
   { id: "usuarios", label: "Usuarios y roles", href: "/admin/usuarios", icon: "user", roles: ["admin"], comingSoon: true },
   { id: "ajustes", label: "Ajustes", href: "/admin/ajustes", icon: "shield", roles: ["admin"] },
 ];
@@ -158,6 +157,14 @@ export function AdminShell({
             <Icon name="close" className="h-4 w-4 rotate-180" />
             Cerrar sesión
           </button>
+          {role === "admin" ? (
+            <a
+              href="/admin/registro"
+              className="mt-2 block text-center text-[11px] font-medium text-ink-soft/50 transition-colors hover:text-ink-soft"
+            >
+              registro
+            </a>
+          ) : null}
         </div>
       </aside>
 
