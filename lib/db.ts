@@ -386,6 +386,17 @@ function ensureSchema(conn: DatabaseSync): void {
     );
   }
 
+  // R4-B-CAL-1: un bloqueo puede cubrir solo una franja (start_hour..end_hour,
+  // inclusiva). NULL = día completo.
+  const exCols = conn
+    .prepare("PRAGMA table_info(date_exceptions)")
+    .all() as Array<{ name: string }>;
+  for (const col of ["start_hour", "end_hour"]) {
+    if (!exCols.some((c) => c.name === col)) {
+      conn.exec(`ALTER TABLE date_exceptions ADD COLUMN ${col} INTEGER;`);
+    }
+  }
+
   // Excepciones por fecha (R4-B-3, 5.02): bloqueos tipo vacaciones/festivo
   // por profesional (`pro_id`) o para todos (`*`), en un rango ISO inclusivo.
   // El motor (`lib/schedule.ts`) los trata como día sin horarios y la

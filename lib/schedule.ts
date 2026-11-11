@@ -287,13 +287,15 @@ export function daySlotsFor(dateIso: string, proId: string): DaySlotsWithReason 
   // PB-3 (R4-B-3): un día bloqueado por excepción (vacaciones/festivo) no
   // ofrece horarios, tenga o no regla el profesional ese día.
   const ex = exceptionFor(proId, dateIso);
-  if (ex)
+  const fullDayBlock = ex !== undefined && (ex.startHour === null || ex.endHour === null);
+  if (fullDayBlock)
     return {
       dateIso,
       hours: [],
       reason: "cerrado",
       freeCount: 0,
-      blockedLabel: exceptionLabel(ex),
+      // La nota es privada del admin: el paciente solo ve el tipo.
+      blockedLabel: exceptionKindLabel(ex),
     };
 
   const rule = getRule(proId, dateIso);
@@ -310,12 +312,23 @@ export function daySlotsFor(dateIso: string, proId: string): DaySlotsWithReason 
   const lastDayOfMonth = `${yearMonth}-${String(getLastDayOfMonth(dateIso)).padStart(2, "0")}`;
   const taken = takenSet(proId, firstDayOfMonth, lastDayOfMonth);
 
-  // R4-B-PROF-1: el rango configurado es INCLUSIVO (x…y): si el panel dice
-  // «última cita 20», también se ofrece 20:00.
+  // R4-B-PROF-1/CAL-1: el rango configurado es INCLUSIVO (x…y): si el panel
+  // dice «última cita 20», también se ofrece 20:00. Las franjas bloqueadas se
+  // restan sin cerrar el resto del día.
+  const blocked = blockedHours(proId, dateIso);
   const hours: { hour: number; taken: boolean }[] = [];
   for (let h = rule.open; h <= rule.close; h++) {
+    if (blocked.has(h)) continue;
     hours.push({ hour: h, taken: taken.has(`${dateIso}|${h}`) });
   }
+  if (hours.length === 0)
+    return {
+      dateIso,
+      hours: [],
+      reason: "cerrado",
+      freeCount: 0,
+      blockedLabel: ex ? exceptionKindLabel(ex) : "Bloqueo",
+    };
   return {
     dateIso,
     hours,
@@ -380,7 +393,10 @@ function slotCandidateError(
   // PB-3 (R4-B-3): el bloqueo por excepción también corta por API (no solo
   // en la vista): aunque alguien mande el slot a mano, no se agenda.
   const ex = exceptionFor(proId, dateIso);
-  if (ex) return `Ese día está bloqueado en la agenda (${exceptionLabel(ex)}). Elige otro.`;
+  if (ex && (ex.startHour === null || ex.endHour === null))
+    return `Ese día está bloqueado en la agenda (${exceptionKindLabel(ex)}). Elige otro.`;
+  if (blockedHours(proId, dateIso).has(hour))
+    return "Esa hora está bloqueada en la agenda. Elige otra.";
   if (hour < rule.open || hour > rule.close) return "Esa hora está fuera del horario del profesional.";
   return null;
 }
@@ -451,6 +467,9 @@ export interface ExceptionView {
   kind: ExceptionKind;
   note: string;
   active: boolean;
+  /** R4-B-CAL-1: franja bloqueada (inclusiva). null/undefined = día completo. */
+  startHour: number | null;
+  endHour: number | null;
 }
 
 export interface ExceptionInput {
@@ -461,6 +480,9 @@ export interface ExceptionInput {
   kind: string;
   note: string;
   active: boolean;
+  /** R4-B-CAL-1: franja (inclusiva); null = día completo. */
+  startHour?: number | null;
+  endHour?: number | null;
 }
 
 interface ExceptionRow {
@@ -471,6 +493,8 @@ interface ExceptionRow {
   kind: string;
   note: string;
   active: number;
+  start_hour: number | null;
+  end_hour: number | null;
 }
 
 function rowToException(r: ExceptionRow): ExceptionView {
@@ -482,14 +506,24 @@ function rowToException(r: ExceptionRow): ExceptionView {
     kind: EXCEPTION_KINDS.includes(r.kind as ExceptionKind) ? (r.kind as ExceptionKind) : "bloqueo",
     note: r.note,
     active: r.active === 1,
+    startHour: r.start_hour ?? null,
+    endHour: r.end_hour ?? null,
   };
 }
 
-/** Etiqueta legible del bloqueo para la UI y los mensajes de error. */
+/** Etiqueta legible del bloqueo para la UI del panel (incluye la nota). */
 export function exceptionLabel(e: { kind: string; note: string }): string {
   const base = e.kind === "vacaciones" ? "Vacaciones" : e.kind === "festivo" ? "Festivo" : "Bloqueo";
   const note = e.note.trim();
   return note ? `${base}: ${note}` : base;
+}
+
+/**
+ * R4-B-CAL-1: etiqueta PÚBLICA (sin nota). La nota es un recordatorio interno
+ * del admin y no debe filtrarse al paciente.
+ */
+export function exceptionKindLabel(e: { kind: string }): string {
+  return e.kind === "vacaciones" ? "Vacaciones" : e.kind === "festivo" ? "Festivo" : "Bloqueo";
 }
 
 export function listExceptions(): ExceptionView[] {
@@ -528,31 +562,41 @@ export function saveException(input: ExceptionInput): { ok: true; id: number } |
   const kind = String(input.kind ?? "").trim() as ExceptionKind;
   if (!EXCEPTION_KINDS.includes(kind)) return { ok: false, error: "El tipo de bloqueo no es válido." };
   const note = String(input.note ?? "").trim().slice(0, 200);
+  const sh = input.startHour ?? null;
+  const eh = input.endHour ?? null;
+  if ((sh === null) !== (eh === null))
+    return { ok: false, error: "Para bloquear por horas indica inicio y fin (o déjalo vacío para el día completo)." };
+  if (sh !== null && eh !== null) {
+    if (!Number.isInteger(sh) || !Number.isInteger(eh) || sh < 0 || eh > 23 || sh > eh)
+      return { ok: false, error: "La franja debe ir de una hora a otra entre 0 y 23, con inicio ≤ fin." };
+  }
   const now = Date.now();
 
   if (input.id != null) {
     const res = getDb()
       .prepare(
-        `UPDATE date_exceptions SET pro_id = ?, date_from = ?, date_to = ?, kind = ?, note = ?, active = ?, updated_at = ?
+        `UPDATE date_exceptions SET pro_id = ?, date_from = ?, date_to = ?, kind = ?, note = ?, active = ?,
+           start_hour = ?, end_hour = ?, updated_at = ?
          WHERE id = ?`,
       )
-      .run(proId, input.dateFrom, input.dateTo, kind, note, input.active ? 1 : 0, now, input.id);
+      .run(proId, input.dateFrom, input.dateTo, kind, note, input.active ? 1 : 0, sh, eh, now, input.id);
     if (res.changes === 0) return { ok: false, error: "Ese bloqueo ya no existe." };
     return { ok: true, id: input.id };
   }
   // Duplicado exacto (mismo pro y rango): no se crea dos veces.
   const dup = getDb()
     .prepare(
-      `SELECT id FROM date_exceptions WHERE pro_id = ? AND date_from = ? AND date_to = ? LIMIT 1`,
+      `SELECT id FROM date_exceptions WHERE pro_id = ? AND date_from = ? AND date_to = ?
+         AND start_hour IS ? AND end_hour IS ? LIMIT 1`,
     )
-    .get(proId, input.dateFrom, input.dateTo) as { id: number } | undefined;
+    .get(proId, input.dateFrom, input.dateTo, sh, eh) as { id: number } | undefined;
   if (dup) return { ok: false, error: "Ya existe un bloqueo con esas fechas para ese profesional." };
   const res = getDb()
     .prepare(
-      `INSERT INTO date_exceptions (pro_id, date_from, date_to, kind, note, active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO date_exceptions (pro_id, date_from, date_to, kind, note, active, start_hour, end_hour, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(proId, input.dateFrom, input.dateTo, kind, note, input.active ? 1 : 0, now, now);
+    .run(proId, input.dateFrom, input.dateTo, kind, note, input.active ? 1 : 0, sh, eh, now, now);
   return { ok: true, id: Number(res.lastInsertRowid) };
 }
 
@@ -592,6 +636,32 @@ export function exceptionsCovering(
   return opts.includeInactive ? out : out.filter((e) => e.active);
 }
 
+/**
+ * R4-B-CAL-1: horas (de inicio de cita) bloqueadas por excepciones parciales.
+ * Los bloqueos de día completo no entran aquí: esos cierran el día entero.
+ */
+export function blockedHours(proId: string, dateIso: string): Set<number> {
+  const out = new Set<number>();
+  for (const e of exceptionsCovering(proId, dateIso)) {
+    if (e.startHour === null || e.endHour === null) continue;
+    for (let h = e.startHour; h <= e.endHour; h++) out.add(h);
+  }
+  return out;
+}
+
+/** R4-B-CAL-1: todos los bloqueos (cualquier profesional y `*`) activos de un día. */
+export function exceptionsOnDate(dateIso: string, includeInactive = false): ExceptionView[] {
+  if (!ISO_DATE_RE.test(dateIso)) return [];
+  const rows = getDb()
+    .prepare(
+      `SELECT * FROM date_exceptions
+       WHERE (${includeInactive ? "1 = 1" : "active = 1"}) AND ? BETWEEN date_from AND date_to
+       ORDER BY pro_id, id`,
+    )
+    .all(dateIso) as unknown as ExceptionRow[];
+  return rows.map(rowToException);
+}
+
 const isIso = (s: string) => ISO_DATE_RE.test(s);
 const shiftIso = (iso: string, delta: number): string => {
   const d = new Date(`${iso}T12:00:00`);
@@ -605,6 +675,8 @@ export function blockDay(
   dateIso: string,
   kind: string,
   note: string,
+  startHour: number | null = null,
+  endHour: number | null = null,
 ): { ok: true; undo: DayOpUndo } | { ok: false; error: string } {
   const scope = String(proId ?? "").trim();
   if (!scope) return { ok: false, error: "Elige el profesional (o toda la clínica)." };
@@ -613,16 +685,26 @@ export function blockDay(
   if (!isIso(dateIso)) return { ok: false, error: "La fecha no es válida." };
   const k = String(kind ?? "").trim() as ExceptionKind;
   if (!EXCEPTION_KINDS.includes(k)) return { ok: false, error: "El tipo de bloqueo no es válido." };
-  if (exceptionsCovering(scope, dateIso).length > 0)
-    return { ok: false, error: "Ese día ya está bloqueado." };
+  const sh = startHour ?? null;
+  const eh = endHour ?? null;
+  if ((sh === null) !== (eh === null))
+    return { ok: false, error: "Para bloquear por horas indica inicio y fin." };
+  if (sh !== null && eh !== null && (!Number.isInteger(sh) || !Number.isInteger(eh) || sh < 0 || eh > 23 || sh > eh))
+    return { ok: false, error: "La franja debe ir de una hora a otra entre 0 y 23, con inicio ≤ fin." };
+
+  const covering = exceptionsCovering(scope, dateIso);
+  if (covering.some((e) => e.startHour === null || e.endHour === null))
+    return { ok: false, error: "Ese día ya está bloqueado por completo." };
+  if (covering.some((e) => e.startHour === sh && e.endHour === eh))
+    return { ok: false, error: "Ese día ya tiene bloqueada esa misma franja." };
 
   const now = Date.now();
   const res = getDb()
     .prepare(
-      `INSERT INTO date_exceptions (pro_id, date_from, date_to, kind, note, active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+      `INSERT INTO date_exceptions (pro_id, date_from, date_to, kind, note, active, start_hour, end_hour, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
     )
-    .run(scope, dateIso, dateIso, k, String(note ?? "").trim().slice(0, 200), now, now);
+    .run(scope, dateIso, dateIso, k, String(note ?? "").trim().slice(0, 200), sh, eh, now, now);
   return {
     ok: true,
     undo: { dayIso: dateIso, proId: scope, before: [], created: [Number(res.lastInsertRowid)] },
@@ -665,10 +747,10 @@ export function freeDay(
         db.prepare("UPDATE date_exceptions SET date_to = ?, updated_at = ? WHERE id = ?").run(left.to, now, e.id);
         const ins = db
           .prepare(
-            `INSERT INTO date_exceptions (pro_id, date_from, date_to, kind, note, active, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO date_exceptions (pro_id, date_from, date_to, kind, note, active, start_hour, end_hour, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
-          .run(e.proId, right.from, right.to, e.kind, e.note, e.active ? 1 : 0, now, now);
+          .run(e.proId, right.from, right.to, e.kind, e.note, e.active ? 1 : 0, e.startHour, e.endHour, now, now);
         created.push(Number(ins.lastInsertRowid));
       } else if (left) {
         db.prepare("UPDATE date_exceptions SET date_to = ?, updated_at = ? WHERE id = ?").run(left.to, now, e.id);
@@ -704,14 +786,15 @@ export function undoDayOp(undo: DayOpUndo): { ok: true } | { ok: false; error: s
       const exists = db.prepare("SELECT 1 FROM date_exceptions WHERE id = ?").get(e.id);
       if (exists) {
         db.prepare(
-          `UPDATE date_exceptions SET pro_id = ?, date_from = ?, date_to = ?, kind = ?, note = ?, active = ?, updated_at = ?
+          `UPDATE date_exceptions SET pro_id = ?, date_from = ?, date_to = ?, kind = ?, note = ?, active = ?,
+             start_hour = ?, end_hour = ?, updated_at = ?
            WHERE id = ?`,
-        ).run(e.proId, e.dateFrom, e.dateTo, e.kind, e.note, e.active ? 1 : 0, now, e.id);
+        ).run(e.proId, e.dateFrom, e.dateTo, e.kind, e.note, e.active ? 1 : 0, e.startHour, e.endHour, now, e.id);
       } else {
         db.prepare(
-          `INSERT INTO date_exceptions (id, pro_id, date_from, date_to, kind, note, active, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(e.id, e.proId, e.dateFrom, e.dateTo, e.kind, e.note, e.active ? 1 : 0, now, now);
+          `INSERT INTO date_exceptions (id, pro_id, date_from, date_to, kind, note, active, start_hour, end_hour, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(e.id, e.proId, e.dateFrom, e.dateTo, e.kind, e.note, e.active ? 1 : 0, e.startHour, e.endHour, now, now);
       }
     }
     db.exec("COMMIT");

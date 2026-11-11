@@ -49,7 +49,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
     <AdminProvider session={{ user: { id: profile.id, email: profile.email } }}>
       <AdminShell profile={profile} />
       <ProfileProvider profile={profile}>
-        <div className="pl-60 pr-4 pt-16 pb-6 lg:pt-6 sm:pl-64">{children}</div>
+        <div className="pl-0 pr-4 pt-16 pb-6 sm:pl-64 lg:pt-6">{children}</div>
       </ProfileProvider>
     </AdminProvider>
   );

@@ -18,6 +18,13 @@ export const metadata: Metadata = {
   description: "Citas registradas, horarios de atención y vista anual por profesional.",
 };
 
+/** Mes visible del calendario (1–12); default el actual (R4-B-CAL-1). */
+function clampMonth(raw: unknown): number {
+  const n = Number(typeof raw === "string" ? raw : NaN);
+  if (!Number.isInteger(n) || n < 1 || n > 12) return new Date().getMonth() + 1;
+  return n;
+}
+
 /** Año permitido en la vista anual: del anterior (histórico) a +3 (R4-B-3). */
 function clampYear(raw: unknown): number {
   const now = new Date().getFullYear();
@@ -57,6 +64,7 @@ export default async function HorariosPage({
   const sp = await searchParams;
   const pros = getProfessionals();
   const year = clampYear(sp.year);
+  const month = clampMonth(sp.month);
   const proArg = typeof sp.pro === "string" ? sp.pro : "";
   const proId = pros.some((p) => p.id === proArg) ? proArg : (pros[0]?.id ?? "");
   const initialTab = sp.tab === "calendario" || sp.tab === "horarios" ? sp.tab : "agenda";
@@ -85,6 +93,7 @@ export default async function HorariosPage({
         professionals={pros}
         initialTab={initialTab}
         year={year}
+        month={month}
         proId={proId}
         yearDays={proId ? yearSchedule(proId, year) : []}
         exceptions={listExceptions()}

@@ -126,8 +126,15 @@ try {
       return JSON.stringify({ months: grids.length, legend, h2 });
     }),
   );
-  line(`2) vista anual: meses=${vi.months}, leyenda=${vi.legend}, título="${vi.h2}"`);
-  if (vi.months !== 12 || !vi.legend) fails++;
+  // R4-B-CAL-1: el calendario muestra UN mes a la vez (con selector de mes).
+  const viMes = JSON.parse(
+    await admin.js(() => {
+      const sel = document.querySelector('select[aria-label="Mes del calendario"]');
+      return JSON.stringify({ selector: !!sel, opciones: sel ? sel.options.length : 0 });
+    }),
+  );
+  line(`2) calendario por mes: grillas=${vi.months}, leyenda=${vi.legend}, título="${vi.h2}", selectorMes=${viMes.selector} (${viMes.opciones} opciones)`);
+  if (vi.months !== 1 || !vi.legend || !viMes.selector || viMes.opciones !== 12) fails++;
 
   // --- 3. PB-3 bloqueo sobre un día que HOY tiene cupo -----------------------
   // 3a) primer día con cupo en /agendar (contexto limpio)

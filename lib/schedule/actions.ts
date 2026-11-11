@@ -31,6 +31,7 @@ import {
   deleteRule,
   daySlotsFor,
   exceptionsCovering,
+  exceptionsOnDate,
   freeDay,
   listExceptions,
   monthSchedule,
@@ -256,7 +257,9 @@ type FreeDayResult =
 export async function fetchDayBlocks(proId: string, dateIso: string): Promise<DayBlocksResult> {
   const guard = await guardSchedule();
   if (!guard.ok) return { ok: false, error: guard.error };
-  return { ok: true, blocks: exceptionsCovering(proId, dateIso, { includeInactive: true }) };
+  // R4-B-CAL-1: el panel muestra TODOS los bloqueos del día (varios profesionales),
+  // no solo los del profesional seleccionado.
+  return { ok: true, blocks: exceptionsOnDate(dateIso, true) };
 }
 
 /** Bloquea exactamente un día (PB-1). */
@@ -265,15 +268,74 @@ export async function blockDayAction(
   dateIso: string,
   kind: string,
   note: string,
+  startHour: number | null = null,
+  endHour: number | null = null,
 ): Promise<DayOpResult> {
   const guard = await guardSchedule();
   if (!guard.ok) return { ok: false, error: guard.error };
-  const res = blockDay(proId, dateIso, kind, note);
+  const res = blockDay(proId, dateIso, kind, note, startHour, endHour);
   if (res.ok) {
-    logAudit(guard.actor, "excepcion.bloquear-dia", "date_exception", `${proId}:${dateIso}`, `tipo=${kind}`);
+    logAudit(
+      guard.actor,
+      "excepcion.bloquear-dia",
+      "date_exception",
+      `${proId}:${dateIso}`,
+      `tipo=${kind}${startHour !== null ? ` franja=${startHour}-${endHour}h` : " día completo"}`,
+    );
     revalidatePath("/admin/horarios");
   }
   return res;
+}
+
+/**
+ * R4-B-CAL-1: bloquea uno o varios días para uno o varios profesionales
+ * (o `*`) de una sola vez, con franja opcional.
+ */
+export async function blockDaysAction(input: {
+  proIds: string[];
+  dates: string[];
+  kind: string;
+  note: string;
+  startHour: number | null;
+  endHour: number | null;
+}): Promise<{ ok: true; undo: DayOpUndo; created: number; skipped: number } | { ok: false; error: string }> {
+  const guard = await guardSchedule();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  const proIds = [...new Set(input.proIds.map((p) => String(p).trim()).filter(Boolean))];
+  const dates = [...new Set(input.dates.map((d) => String(d).trim()).filter(Boolean))];
+  if (proIds.length === 0) return { ok: false, error: "Marca al menos un profesional." };
+  if (dates.length === 0) return { ok: false, error: "Elige al menos un día." };
+
+  const created: number[] = [];
+  let skipped = 0;
+  let firstErr: string | null = null;
+  for (const p of proIds) {
+    for (const d of dates) {
+      const res = blockDay(p, d, input.kind, input.note, input.startHour, input.endHour);
+      if (res.ok) created.push(...res.undo.created);
+      else {
+        skipped += 1;
+        firstErr ??= res.error;
+      }
+    }
+  }
+  if (created.length === 0) return { ok: false, error: firstErr ?? "No se pudo crear ningún bloqueo." };
+
+  logAudit(
+    guard.actor,
+    "excepcion.bloquear",
+    "date_exception",
+    `${proIds.join(",")}:${dates.join(",")}`,
+    `tipo=${input.kind}${input.startHour !== null ? ` franja=${input.startHour}-${input.endHour}h` : " día completo"} (${created.length})`,
+  );
+  revalidatePath("/admin/horarios");
+  revalidatePath("/agendar");
+  return {
+    ok: true,
+    undo: { dayIso: dates[0], proId: proIds[0], before: [], created },
+    created: created.length,
+    skipped,
+  };
 }
 
 /** Libera exactamente un día, partiendo el rango si hacía falta (PB-2). */

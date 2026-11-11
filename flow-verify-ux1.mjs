@@ -207,9 +207,17 @@ try {
   line(`8) rango creado (${a} → ${b}): ${JSON.stringify(rango1)}`);
   if (rango1.length !== 1 || rango1[0].date_from !== a || rango1[0].date_to !== b) fails++;
 
+  // R4-B-CAL-1: el calendario muestra un mes a la vez → abrir el mes del día medio.
+  await admin.js((iso) => {
+    const sel = document.querySelector('select[aria-label="Mes del calendario"]');
+    if (!sel) return;
+    const proto = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
+    proto.call(sel, String(Number(iso.slice(5, 7))));
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+  }, mid);
+  await sleep(1500);
   // el día del medio está dentro del rango: clic → "Liberar este día"
   await admin.js((iso) => {
-    // navegar al mes del día si hace falta: se busca en cualquier grid
     const b = [...document.querySelectorAll('[role="grid"] button')].find((x) => (x.getAttribute("title") || "").startsWith(iso));
     if (b) b.click();
   }, mid);

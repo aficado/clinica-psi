@@ -14,6 +14,7 @@ import type {
 import {
   adminCancelAppointment,
   blockDayAction,
+  blockDaysAction,
   deleteAvailabilityRule,
   deleteDateException,
   fetchDayBlocks,
@@ -59,6 +60,7 @@ export function ScheduleManager({
   professionals,
   initialTab = "agenda",
   year,
+  month,
   proId,
   yearDays,
   exceptions,
@@ -69,6 +71,7 @@ export function ScheduleManager({
   professionals: Professional[];
   initialTab?: Tab;
   year: number;
+  month: number;
   proId: string;
   yearDays: YearDay[];
   exceptions: ExceptionView[];
@@ -80,6 +83,10 @@ export function ScheduleManager({
   const [msg, setMsg] = useState<Msg>(null);
   const [armed, setArmed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // R4-B-CAL-1: pestaña Horarios — un profesional a la vez.
+  const [rulesPro, setRulesPro] = useState(proId);
+  // R4-B-CAL-1: pestaña Calendario — un mes a la vez.
+  const [calMonth, setCalMonth] = useState(month);
   const [drafts, setDrafts] = useState<Record<number, Draft>>({});
   const [adds, setAdds] = useState<Record<string, { dow: string; open: string; close: string }>>({});
   const [exDraft, setExDraft] = useState<{
@@ -96,12 +103,22 @@ export function ScheduleManager({
   const [dayKind, setDayKind] = useState("festivo");
   const [dayNote, setDayNote] = useState("");
   const [dayAllClinic, setDayAllClinic] = useState(false);
+  // R4-B-CAL-1: bloqueo para varios profesionales y por franja de horas.
+  const [dayPros, setDayPros] = useState<string[]>([]);
+  const [dayAllDay, setDayAllDay] = useState(true);
+  const [dayStart, setDayStart] = useState("9");
+  const [dayEnd, setDayEnd] = useState("12");
   const [panelBusy, setPanelBusy] = useState(false);
   /** Repintado inmediato del día sin esperar el re-render del servidor. */
   const [override, setOverride] = useState<Record<string, "cerrado" | "abierto">>({});
   /** Pila de operaciones deshacibles (PB-4) — vive en esta sesión de página. */
   const [undoStack, setUndoStack] = useState<{ undo: DayOpUndo; label: string }[]>([]);
   const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string; preview?: string } | null>(null);
+
+  // R4-B-CAL-1: una sola tarjeta (profesional elegido) y un solo mes visibles.
+  const shownPro = professionals.find((p) => p.id === rulesPro) ?? professionals[0];
+  const calDays = yearDays.filter((d) => Number(d.dateIso.slice(5, 7)) === calMonth);
+  const calFirstDow = (new Date(year, calMonth - 1, 1).getDay() + 6) % 7;
 
   const now = Date.now();
   const upcoming = appointments.filter((a) => a.status === "confirmada" && a.startMs >= now);
@@ -260,6 +277,10 @@ export function ScheduleManager({
     setDayBlocks(null);
     setDayNote("");
     setDayAllClinic(false);
+    setDayPros([proId]);
+    setDayAllDay(true);
+    setDayStart("9");
+    setDayEnd("12");
     const res = await fetchDayBlocks(proId, iso);
     setDayBlocks(res.ok ? res.blocks : []);
     if (!res.ok) setBanner({ kind: "err", text: res.error });
@@ -272,19 +293,41 @@ export function ScheduleManager({
 
   async function doBlockDay() {
     if (!dayPanel) return;
+    const proIds = dayAllClinic ? ["*"] : dayPros.length > 0 ? dayPros : [proId];
+    const sh = dayAllDay ? null : parseInt(dayStart, 10);
+    const eh = dayAllDay ? null : parseInt(dayEnd, 10);
+    if (!dayAllDay) {
+      if (sh === null || eh === null || !Number.isInteger(sh) || !Number.isInteger(eh) || sh > eh) {
+        setBanner({ kind: "err", text: "La franja debe ir de una hora a otra, con inicio ≤ fin." });
+        return;
+      }
+    }
     setPanelBusy(true);
-    const res = await blockDayAction(dayAllClinic ? "*" : proId, dayPanel.iso, dayKind, dayNote);
+    const res = await blockDaysAction({
+      proIds,
+      dates: [dayPanel.iso],
+      kind: dayKind,
+      note: dayNote,
+      startHour: sh,
+      endHour: eh,
+    });
     setPanelBusy(false);
     if (!res.ok) {
       setBanner({ kind: "err", text: res.error });
       return;
     }
     const label = formatDateLongMX(dayPanel.iso);
-    setOverride((o) => ({ ...o, [dayPanel.iso]: "cerrado" }));
+    // Con franja horaria el día no queda cerrado entero: no se pinta de rojo.
+    if (dayAllDay) setOverride((o) => ({ ...o, [dayPanel.iso]: "cerrado" }));
     setUndoStack((s) => [...s.slice(-19), { undo: res.undo, label: `Bloqueo de ${label}` }]);
+    const quien = dayAllClinic
+      ? "toda la clínica"
+      : proIds.length === 1
+        ? proName(proIds[0])
+        : `${proIds.length} profesionales`;
     setBanner({
       kind: "ok",
-      text: `Día bloqueado: ${label} · ${KIND_LABEL[dayKind]}${dayAllClinic ? " (toda la clínica)" : ` · ${proName(proId)}`}`,
+      text: `Día bloqueado: ${label} · ${KIND_LABEL[dayKind]} · ${quien}${dayAllDay ? "" : ` · ${sh ?? ""}:00–${eh ?? ""}:00`}`,
       preview: previewHref(dayPanel.iso),
     });
     closeDayPanel();
@@ -469,7 +512,27 @@ export function ScheduleManager({
             de la semana. Los bloqueos por fecha concreta (vacaciones/festivos, 5.02) se gestionan
             en la pestaña <strong>Calendario anual</strong>.
           </p>
-          {professionals.map((p) => {
+          <div className="flex flex-col gap-2 rounded-(--radius-card) bg-white p-4 shadow-[0_1px_2px_rgba(31,42,39,0.06)] sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
+            <label className="flex items-center gap-2 text-sm">
+              <span className="font-semibold">Profesional:</span>
+              <select
+                aria-label="Profesional del horario semanal"
+                value={shownPro?.id ?? ""}
+                onChange={(e) => setRulesPro(e.target.value)}
+                className="h-11 w-full rounded-(--radius-btn) border border-ink/15 bg-white px-2 sm:w-auto"
+              >
+                {professionals.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="text-xs text-ink-soft sm:ml-auto">
+              Se muestra un profesional a la vez para no alargar la página.
+            </p>
+          </div>
+          {[shownPro].filter((p): p is Professional => Boolean(p)).map((p) => {
             const own = rules.filter((r) => r.proId === p.id).sort((a, b) => a.dow - b.dow);
             const used = new Set(own.map((r) => r.dow));
             const freeDays = DAYS.map((_, i) => i).filter((i) => !used.has(i));
@@ -588,18 +651,18 @@ export function ScheduleManager({
       {/* ---- R4-B-3 (PB-2/PB-3): vista anual + bloqueos por fecha ---- */}
       {tab === "calendario" ? (
         <div className="mt-6 space-y-6">
-          <Card className="p-5">
-            <div className="flex flex-wrap items-center gap-3">
-              <h2 className="text-lg font-semibold">Calendario anual</h2>
-              <label className="flex items-center gap-2 text-sm">
+          <Card className="p-4 sm:p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+              <h2 className="text-lg font-semibold">Calendario por mes</h2>
+              <label className="flex w-full flex-col gap-1 text-sm sm:w-auto sm:flex-row sm:items-center sm:gap-2">
                 <span className="text-ink-soft">Profesional:</span>
                 <select
                   aria-label="Profesional del calendario anual"
                   value={proId}
                   onChange={(e) => {
-                    router.push(`/admin/horarios?tab=calendario&year=${year}&pro=${e.target.value}`);
+                    router.push(`/admin/horarios?tab=calendario&year=${year}&month=${calMonth}&pro=${e.target.value}`);
                   }}
-                  className="h-11 rounded-(--radius-btn) border border-ink/15 bg-white px-2"
+                  className="h-11 w-full rounded-(--radius-btn) border border-ink/15 bg-white px-2 sm:w-auto"
                 >
                   {professionals.map((p) => (
                     <option key={p.id} value={p.id}>
@@ -608,9 +671,24 @@ export function ScheduleManager({
                   ))}
                 </select>
               </label>
-              <span className="ml-auto flex items-center gap-2">
+              <label className="flex w-full flex-col gap-1 text-sm sm:w-auto sm:flex-row sm:items-center sm:gap-2">
+                <span className="text-ink-soft">Mes:</span>
+                <select
+                  aria-label="Mes del calendario"
+                  value={calMonth}
+                  onChange={(e) => setCalMonth(Number(e.target.value))}
+                  className="h-11 w-full rounded-(--radius-btn) border border-ink/15 bg-white px-2 capitalize sm:w-auto"
+                >
+                  {MONTHS.map((m, i) => (
+                    <option key={m} value={i + 1}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <span className="flex flex-wrap items-center gap-2 sm:ml-auto">
                 <Link
-                  href={`/admin/horarios?tab=calendario&year=${year - 1}${proId ? `&pro=${proId}` : ""}`}
+                  href={`/admin/horarios?tab=calendario&year=${year - 1}&month=${calMonth}${proId ? `&pro=${proId}` : ""}`}
                   className="btn inline-flex min-h-11 items-center rounded-(--radius-btn) border-2 border-sage/40 bg-white px-3 font-semibold hover:border-sage hover:bg-sage/10"
                   aria-label={`Ver el año ${year - 1}`}
                 >
@@ -618,7 +696,7 @@ export function ScheduleManager({
                 </Link>
                 <span className="min-w-16 text-center text-lg font-semibold">{year}</span>
                 <Link
-                  href={`/admin/horarios?tab=calendario&year=${year + 1}${proId ? `&pro=${proId}` : ""}`}
+                  href={`/admin/horarios?tab=calendario&year=${year + 1}&month=${calMonth}${proId ? `&pro=${proId}` : ""}`}
                   className="btn inline-flex min-h-11 items-center rounded-(--radius-btn) border-2 border-sage/40 bg-white px-3 font-semibold hover:border-sage hover:bg-sage/10"
                   aria-label={`Ver el año ${year + 1}`}
                 >
@@ -635,23 +713,20 @@ export function ScheduleManager({
               <li><span className="mr-1 inline-block h-3 w-3 rounded-sm bg-terracotta/50" aria-hidden="true" /> bloqueado (vacaciones/festivo)</li>
             </ul>
 
-            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {MONTHS.map((name, i) => {
-                const days = yearDays.filter((d) => Number(d.dateIso.slice(5, 7)) === i + 1);
-                const firstDow = (new Date(year, i, 1).getDay() + 6) % 7; // lunes = 0
-                return (
-                  <div key={name} className="rounded-(--radius-card) border border-ink/10 bg-white p-3">
-                    <h3 className="text-sm font-semibold capitalize">{name}</h3>
-                    <div className="mt-2 grid grid-cols-7 gap-1" role="grid" aria-label={`${name} ${year}`}>
+            <div className="mx-auto mt-4 w-full rounded-(--radius-card) border border-ink/10 bg-white p-2 sm:max-w-md sm:p-3">
+              <h3 className="text-center text-sm font-semibold capitalize">
+                {MONTHS[calMonth - 1]} {year}
+              </h3>
+              <div className="mt-2 grid grid-cols-7 gap-1" role="grid" aria-label={`${MONTHS[calMonth - 1]} ${year}`}>
                       {["L", "M", "X", "J", "V", "S", "D"].map((d) => (
                         <span key={d} className="text-center text-[10px] font-semibold text-ink-soft" aria-hidden="true">
                           {d}
                         </span>
                       ))}
-                      {Array.from({ length: firstDow }).map((_, k) => (
+                      {Array.from({ length: calFirstDow }).map((_, k) => (
                         <span key={`pad-${k}`} aria-hidden="true" />
                       ))}
-                      {days.map((d) => {
+                      {calDays.map((d) => {
                         // PB-1: cada día es un botón — clic = bloquear/liberar ese día exacto.
                         const ov = override[d.dateIso];
                         const blocked = ov ? ov === "cerrado" : d.reason === "cerrado";
@@ -696,10 +771,7 @@ export function ScheduleManager({
                           </button>
                         );
                       })}
-                    </div>
-                  </div>
-                );
-              })}
+              </div>
             </div>
           </Card>
 
@@ -783,6 +855,9 @@ export function ScheduleManager({
                         <div key={e.id} className="rounded-(--radius-btn) border border-terracotta/40 bg-terracotta/10 p-3 text-sm">
                           <p className="font-semibold text-terracotta-dark">
                             {KIND_LABEL[e.kind] ?? e.kind} · {proName(e.proId)}
+                            {e.startHour !== null && e.endHour !== null
+                              ? ` · ${String(e.startHour).padStart(2, "0")}:00–${String(e.endHour).padStart(2, "0")}:00`
+                              : " · todo el día"}
                           </p>
                           {e.dateFrom !== e.dateTo ? (
                             <p className="mt-0.5 text-xs text-ink-soft">
@@ -791,7 +866,7 @@ export function ScheduleManager({
                           ) : null}
                           {e.note ? <p className="mt-0.5 text-xs">“{e.note}”</p> : null}
                           <div className="mt-2">
-                            {e.proId === proId ? (
+                            {e.proId !== "*" ? (
                               <Button variant="primary" onClick={() => doFreeDay(e.proId)} disabled={panelBusy}>
                                 Liberar este día
                               </Button>
@@ -814,6 +889,97 @@ export function ScheduleManager({
                 ) : (
                   <div className="mt-3 space-y-3">
                     <p className="text-sm text-ink-soft">Este día no está bloqueado.</p>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-ink-soft">
+                        Profesionales
+                      </p>
+                      <div className="mt-1.5 grid gap-1">
+                        {professionals.map((p) => (
+                          <label key={p.id} className="flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={dayAllClinic || dayPros.includes(p.id)}
+                              disabled={dayAllClinic}
+                              onChange={(ev) =>
+                                setDayPros((prev) =>
+                                  ev.target.checked ? [...prev, p.id] : prev.filter((x) => x !== p.id),
+                                )
+                              }
+                              className="h-4 w-4 accent-sage"
+                            />
+                            {p.name}
+                          </label>
+                        ))}
+                        <label className="mt-1 flex items-center gap-2 text-sm font-semibold">
+                          <input
+                            type="checkbox"
+                            checked={dayAllClinic}
+                            onChange={(ev) => setDayAllClinic(ev.target.checked)}
+                            className="h-4 w-4 accent-sage"
+                          />
+                          Toda la clínica
+                        </label>
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-ink-soft">
+                        Horario a bloquear
+                      </p>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name="day-hours"
+                            checked={dayAllDay}
+                            onChange={() => setDayAllDay(true)}
+                            className="accent-sage"
+                          />
+                          Todo el día
+                        </label>
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name="day-hours"
+                            checked={!dayAllDay}
+                            onChange={() => setDayAllDay(false)}
+                            className="accent-sage"
+                          />
+                          Solo una franja
+                        </label>
+                      </div>
+                      {!dayAllDay ? (
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+                          <select
+                            aria-label="Hora de inicio del bloqueo"
+                            value={dayStart}
+                            onChange={(ev) => setDayStart(ev.target.value)}
+                            className="h-10 rounded-(--radius-btn) border border-ink/15 bg-white px-2"
+                          >
+                            {Array.from({ length: 24 }, (_, h) => (
+                              <option key={h} value={h}>
+                                {String(h).padStart(2, "0")}:00
+                              </option>
+                            ))}
+                          </select>
+                          <span>a</span>
+                          <select
+                            aria-label="Hora de fin del bloqueo"
+                            value={dayEnd}
+                            onChange={(ev) => setDayEnd(ev.target.value)}
+                            className="h-10 rounded-(--radius-btn) border border-ink/15 bg-white px-2"
+                          >
+                            {Array.from({ length: 24 }, (_, h) => (
+                              <option key={h} value={h}>
+                                {String(h).padStart(2, "0")}:00
+                              </option>
+                            ))}
+                          </select>
+                          <span className="text-xs text-ink-soft">(ambas incluidas)</span>
+                        </div>
+                      ) : null}
+                    </div>
+
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Motivo</p>
                       <div className="mt-1.5 flex flex-wrap gap-2" role="radiogroup" aria-label="Motivo del bloqueo">
@@ -846,17 +1012,6 @@ export function ScheduleManager({
                         onChange={(ev) => setDayNote(ev.target.value)}
                         className="mt-1 h-11 w-full rounded-(--radius-input) border border-ink/15 bg-white px-3"
                       />
-                    </label>
-                    <label className="flex items-start gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={dayAllClinic}
-                        onChange={(ev) => setDayAllClinic(ev.target.checked)}
-                        className="mt-1 h-5 w-5 accent-sage"
-                      />
-                      <span>
-                        Bloquear para <strong>toda la clínica</strong> (ahora: solo {proName(proId)})
-                      </span>
                     </label>
                     <Button onClick={doBlockDay} disabled={panelBusy}>
                       {panelBusy ? "Bloqueando…" : "Bloquear el día"}
@@ -896,9 +1051,14 @@ export function ScheduleManager({
                     <span className="font-mono text-sm">
                       {e.dateFrom} → {e.dateTo}
                     </span>
+                    <span className="text-xs text-ink-soft">
+                      {e.startHour !== null && e.endHour !== null
+                        ? `${String(e.startHour).padStart(2, "0")}:00–${String(e.endHour).padStart(2, "0")}:00`
+                        : "todo el día"}
+                    </span>
                     {e.note ? <span className="text-sm">“{e.note}”</span> : null}
                     {!e.active ? <span className="text-xs font-semibold uppercase">inactivo</span> : null}
-                    <span className="ml-auto flex gap-2">
+                    <span className="flex w-full flex-wrap justify-end gap-2 sm:ml-auto sm:w-auto">
                       <Button variant="ghost" onClick={() => toggleException(e)} disabled={busy}>
                         {e.active ? "Desactivar" : "Activar"}
                       </Button>
@@ -916,7 +1076,7 @@ export function ScheduleManager({
               <summary className="min-h-11 cursor-pointer text-sm font-semibold">
                 Añadir bloqueo por rango (vacaciones de varios días)
               </summary>
-            <div className="mt-2 flex flex-wrap items-end gap-3">
+            <div className="mt-2 grid gap-3 sm:grid-cols-2">
               <label className="flex flex-col gap-1 text-sm">
                 <span className="font-medium">Profesional</span>
                 <select
@@ -962,7 +1122,7 @@ export function ScheduleManager({
                   <option value="bloqueo">Bloqueo</option>
                 </select>
               </label>
-              <label className="flex min-w-44 flex-1 flex-col gap-1 text-sm">
+              <label className="flex w-full flex-col gap-1 text-sm sm:col-span-2">
                 <span className="font-medium">Nota (opcional)</span>
                 <input
                   type="text"
@@ -973,7 +1133,7 @@ export function ScheduleManager({
                   className="h-11 rounded-(--radius-btn) border border-ink/15 bg-white px-3"
                 />
               </label>
-              <Button onClick={addException} disabled={busy}>
+              <Button onClick={addException} disabled={busy} className="w-full justify-center sm:col-span-2 sm:w-auto">
                 Bloquear el rango
               </Button>
             </div>
