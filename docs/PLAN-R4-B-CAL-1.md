@@ -5,7 +5,7 @@
 **Solicitud del dueño (resumen):**
 > No desplegar los horarios de todos los profesionales de golpe: elegir experto y ver solo los suyos. Poder bloquear cualquier día (lun–dom), para uno o varios profesionales (casillas), con hora de inicio/fin en 24 h y una nota solo para el admin. Las horas agendables deben ser n…p (inclusive), no n…p-1. El calendario anual debe mostrar solo el mes elegido. Todo reactivo en teléfono.
 
-**Estado:** ✅ EJECUTADO y verificado (2026-11-11).
+**Estado:** ✅ EJECUTADO y verificado (2026-11-11) + ajuste CL-8 (panel fijo).
 
 ## 1. Diagnóstico
 
@@ -48,3 +48,10 @@ Motor de reserva pública (solo hereda), datos existentes, pestaña Citas.
 8) Móvil 390 px: calendario visible, sin desborde horizontal ✔
 Regresión: check:agenda PASS · UX-1 · R4-B-3 · hotfix-1 · hotfix-2 · final ✔
 ```
+
+## 6. CL-8 — Panel del día FIJO y centrado (2026-11-11)
+
+El panel de bloqueo se anclaba al día clicado y a veces quedaba pegado al borde o fuera de vista. Ahora:
+- Es un **diálogo fijo centrado** (`fixed left-1/2 top-1/2 -translate…`), ancho `min(24rem, 100vw-2rem)` y `max-h-85vh` con scroll.
+- Fondo oscurecido (`bg-ink/30`); **clic fuera cierra** y **Escape** también.
+- Verificado en 1366 (centro exacto 683×450) y en 390 px (cabe, sin desbordes); abre → clic fuera → cierra ✔; Escape ✔.

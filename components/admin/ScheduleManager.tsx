@@ -269,11 +269,10 @@ export function ScheduleManager({
     return base ? `${base}&dia=${iso}` : `/agendar?dia=${iso}`;
   };
 
-  async function openDayPanel(iso: string, el: HTMLElement) {
-    const r = el.getBoundingClientRect();
-    const left = Math.min(Math.max(12, r.left - 10), Math.max(12, window.innerWidth - 356));
-    const flipUp = r.bottom + 300 > window.innerHeight;
-    setDayPanel({ iso, top: flipUp ? Math.max(12, r.top - 300) : r.bottom + 8, left });
+  async function openDayPanel(iso: string) {
+    // R4-B-CAL-2: panel FIJO y centrado en la pantalla (antes se anclaba al día y
+    // a veces quedaba pegado al borde o fuera de vista).
+    setDayPanel({ iso, top: 0, left: 0 });
     setDayBlocks(null);
     setDayNote("");
     setDayAllClinic(false);
@@ -757,7 +756,7 @@ export function ScheduleManager({
                           <button
                             key={d.dateIso}
                             type="button"
-                            onClick={(ev) => openDayPanel(d.dateIso, ev.currentTarget)}
+                            onClick={() => openDayPanel(d.dateIso)}
                             aria-label={`${formatDateLongMX(d.dateIso)} · ${proName(proId)} · ${title}`}
                             aria-pressed={blocked}
                             title={`${d.dateIso} · ${title}`}
@@ -816,7 +815,11 @@ export function ScheduleManager({
           {/* PB-1/PB-2: panel del día, anclado junto a la casilla clicada */}
           {dayPanel ? (
             <>
-              <div className="fixed inset-0 z-40" aria-hidden="true" onClick={closeDayPanel} />
+              <div
+                className="fixed inset-0 z-40 bg-ink/30 backdrop-blur-[1px]"
+                aria-hidden="true"
+                onClick={closeDayPanel}
+              />
               <div
                 role="dialog"
                 aria-label={`Día ${formatDateLongMX(dayPanel.iso)}`}
@@ -827,8 +830,8 @@ export function ScheduleManager({
                 ref={(el) => {
                   if (el) el.focus({ preventScroll: true });
                 }}
-                style={{ top: dayPanel.top, left: dayPanel.left }}
-                className="fixed z-50 w-80 rounded-(--radius-card) border border-ink/15 bg-white p-4 shadow-[0_12px_32px_rgba(31,42,39,0.18)]"
+                aria-modal="true"
+                className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-[min(24rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-(--radius-card) border border-ink/15 bg-white p-4 shadow-[0_12px_32px_rgba(31,42,39,0.18)]"
               >
                 <div className="flex items-start gap-2">
                   <div>
